@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VOID Create Admin Account</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@700&family=Space+Grotesk:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-admin-create="true">
+  <nav class="navbar">
+    <div class="logo" onclick="window.location.href='admin.html'">VOID.</div>
+    <div class="nav-controls"><a href="admin.html" class="back-link">BACK TO ADMIN</a></div>
+  </nav>
+  <main class="view active">
+    <div class="form-container">
+      <form class="auth-form active-form" onsubmit="handleAdminCreate(event)">
+        <h2 class="section-title">CREATE ADMIN ACCOUNT</h2>
+        <p class="password-hint">This page is restricted to an already authenticated administrator.</p>
+        <input type="text" id="admin-create-name" placeholder="FULL NAME" required>
+        <input type="text" id="admin-create-username" placeholder="ADMIN USERNAME" required>
+        <input type="email" id="admin-create-email" placeholder="ADMIN EMAIL ADDRESS" required>
+        <input type="password" id="admin-create-password" placeholder="PASSWORD" required minlength="8">
+        <input type="password" id="admin-create-confirm" placeholder="CONFIRM PASSWORD" required minlength="8">
+        <button type="submit" class="btn-full">CREATE ADMIN ACCOUNT</button>
+        <div class="form-links"><a href="admin.html">BACK TO ADMIN</a><a href="admin-login.html">ADMIN LOGIN</a></div>
+      </form>
+    </div>
+  </main>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
+    import { getDatabase, ref, set, onValue, get } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyClEdgWwQAsIoSjS06_C80NdejAw-e2kig",
+      authDomain: "void-logistics-shaan.firebaseapp.com",
+      databaseURL: "https://void-logistics-shaan-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "void-logistics-shaan",
+      storageBucket: "void-logistics-shaan.firebasestorage.app",
+      messagingSenderId: "956865655329",
+      appId: "1:956865655329:web:07ba9ca251068ea9e92960",
+      measurementId: "G-8MJWY4DG8M"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    window.firebaseDb = db;
+    window.dbRef = ref;
+    window.dbSet = set;
+    window.dbOnValue = onValue;
+    window.dbGet = get;
+</script>
+  <script src="firebase-store.js"></script>
+  <script src="admin-auth.js"></script>
+</body>
+</html>

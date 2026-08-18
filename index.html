@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VOID Streetwear</title>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@700&family=Space+Grotesk:wght@400;600&display=swap" rel="stylesheet">
+    
+    <!-- Leaflet CSS & JS for Live Tracking -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+
+<!-- Google reCAPTCHA Setup -->
+    <script>
+        // Create an empty function so reCAPTCHA doesn't panic if script.js loads a millisecond late
+        window.onRecaptchaApiLoad = function() {
+            window.reCaptchaReady = true;
+        };
+    </script>
+    <script src="https://www.google.com/recaptcha/api.js?onload=onRecaptchaApiLoad&render=explicit" async defer></script>
+
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="logo" onclick="navigateTo('home')">VOID.</div>
+        <div class="nav-controls" style="position: relative;">
+            <ul class="nav-links" id="nav-links">
+                <li><a href="#" onclick="navigateTo('home')">SHOP</a></li>
+                <li><a href="#" onclick="checkAccount()" id="nav-account-link">ACCOUNT</a></li>
+                <li id="nav-orders-li" style="display:none;"><a href="#" onclick="goToMyOrders()">ORDERS</a></li>
+                
+            </ul>
+            
+            <!-- Navbar Profile Icon -->
+            <div class="nav-profile-icon" id="nav-profile-btn" onclick="navigateTo('profile')" title="My Profile">
+                <i class="fa-solid fa-user"></i>
+            </div>
+            
+            <!-- Notification Icon & Dropdown -->
+            <div class="notif-icon" id="notif-btn" title="Activity History" style="position: relative; cursor: pointer; display: flex; align-items: center; margin-right: 5px;">
+                <i class="fa-solid fa-bell" style="font-size: 1.2rem; color: #fff;"></i>
+                <!-- Notification Value Count -->
+                <span id="notif-count" style="position: absolute; top: -6px; right: -8px; background: #818cf8; color: #000; font-size: 0.65rem; font-weight: bold; padding: 1px 4px; border-radius: 50%;">0</span>
+            </div>
+            
+            <div class="notif-dropdown" id="notif-dropdown">
+                <div class="notif-header">
+                    <span>ACTIVITY HISTORY</span>
+                    <div>
+                        <span onclick="markAllNotificationsAsRead()" style="cursor: pointer; font-size: 0.7rem; color: var(--accent); margin-right: 10px;">READ ALL</span>
+                        <span id="close-notif" style="cursor: pointer; font-size: 1.2rem; vertical-align: middle;">&times;</span>
+                    </div>
+                </div>
+                <div class="notif-items" id="notif-items"></div>
+            </div>
+
+            <div class="cart-icon" id="cart-btn">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
+                    <line x1="3" y1="6" x2="21" y2="6"></line>
+                    <path d="M16 10a4 4 0 0 1-8 0"></path>
+                </svg>
+                <span id="cart-count">0</span>
+            </div>
+            <div class="hamburger" onclick="toggleMenu()">☰</div>
+        </div>
+    </nav>
+
+    <!-- HOME VIEW -->
+    <div id="home-view" class="view active">
+        <!-- Brand News & Products Hero Slider -->
+        <header class="hero-slider" id="hero-slider">
+            <div class="slides-container" id="slides-container"></div>
+            <button class="slider-btn prev-btn" onclick="prevSlide()"><i class="fa-solid fa-chevron-left"></i></button>
+            <button class="slider-btn next-btn" onclick="nextSlide()"><i class="fa-solid fa-chevron-right"></i></button>
+            <div class="slider-dots" id="slider-dots"></div>
+        </header>
+
+        <main id="shop" class="shop-section">
+            <h2 class="section-title">NEW ARRIVALS</h2>
+            <div class="shop-controls">
+                <input type="text" id="search-input" placeholder="Search items..." onkeyup="applyFilters()">
+                <select id="category-filter" onchange="applyFilters()">
+                    <option value="all">All Categories</option>
+                    <option value="tops">Tops</option>
+                    <option value="bottoms">Bottoms</option>
+                    <option value="outerwear">Outerwear</option>
+                </select>
+                <select id="price-range-filter" onchange="handlePriceRangeChange()">
+                    <option value="any">Any Budget</option>
+                    <option value="0-50">Under RM50</option>
+                    <option value="50-100">RM50 – RM100</option>
+                    <option value="100-150">RM100 – RM150</option>
+                    <option value="150-999999">RM150 & Above</option>
+                    <option value="custom">Custom Budget…</option>
+                </select>
+                <select id="sort-filter" onchange="applyFilters()">
+                    <option value="default">Sort: Recommended</option>
+                    <option value="low-high">Price: Low to High</option>
+                    <option value="high-low">Price: High to Low</option>
+                </select>
+            </div>
+            <div class="custom-price-range" id="custom-price-range">
+                <input type="number" id="price-min-input" placeholder="Min RM" min="0" onchange="applyFilters()">
+                <span>–</span>
+                <input type="number" id="price-max-input" placeholder="Max RM" min="0" onchange="applyFilters()">
+                <button type="button" onclick="applyFilters()">APPLY</button>
+            </div>
+            <div class="product-grid" id="product-grid"></div>
+        </main>
+    </div>
+
+    <!-- PRODUCT VIEW -->
+    <div id="product-view" class="view">
+        <div class="product-detail-container" id="product-detail-container"></div>
+    </div>
+
+    <!-- AUTH VIEW (LOGIN / SIGNUP) -->
+    <div id="auth-view" class="view">
+        <div class="form-container">
+            <form id="login-form" class="auth-form active-form" onsubmit="handleLogin(event)">
+                <h2 class="section-title">LOGIN</h2>
+                <input type="email" id="login-email" placeholder="EMAIL ADDRESS" autocomplete="email" required>
+                <input type="password" id="login-pass" placeholder="PASSWORD" autocomplete="current-password" required>
+                <div id="login-recaptcha-container" class="recaptcha-wrap"></div>
+                <button type="submit" class="btn-full">SIGN IN</button>
+                <div class="form-links">
+                    <span onclick="switchAuthView('signup')">CREATE ACCOUNT</span>
+                    <span onclick="switchAuthView('forgot')">FORGOT PASSWORD?</span>
+                </div>
+            </form>
+            
+            <form id="signup-form" class="auth-form" onsubmit="handleSignup(event)">
+                <h2 class="section-title">JOIN VOID</h2>
+                <input type="text" id="reg-name" placeholder="FULL NAME" autocomplete="name" required>
+                <input type="text" id="reg-username" placeholder="USERNAME" autocomplete="username" required>
+
+                <div class="field-with-verify">
+                    <input type="email" id="reg-email" placeholder="EMAIL ADDRESS" autocomplete="email" required>
+                    <button type="button" class="verify-field-btn" onclick="startEmailVerification('reg', event)">VERIFY</button>
+                </div>
+                <div class="field-verify-status">
+                    <span class="field-verified-badge" id="reg-email-badge">NOT VERIFIED</span>
+                </div>
+                <input type="hidden" id="reg-email-verified" value="0">
+
+                <input type="password" id="reg-pass" placeholder="PASSWORD" autocomplete="new-password" required minlength="8">
+                <small class="password-hint">Must be 8+ characters and include an uppercase letter, a lowercase letter, a number, and a symbol.</small>
+                
+                <h3 style="font-family: var(--font-heading); font-size: 0.9rem; margin: 1rem 0 0.5rem 0; color: var(--accent);">SHIPPING & CONTACT</h3>
+                <div class="field-with-verify">
+                    <input type="text" id="reg-phone" placeholder="PHONE NUMBER" autocomplete="tel" required>
+                    <button type="button" class="verify-field-btn" onclick="startPhoneVerification('reg', event)">VERIFY</button>
+                </div>
+                <div class="field-verify-status">
+                    <span class="field-verified-badge" id="reg-phone-badge">NOT VERIFIED</span>
+                </div>
+                <input type="hidden" id="reg-phone-verified" value="0">
+
+                <div class="addr-group">
+                    <div class="addr-input-wrap">
+                        <input type="text" id="reg-address" placeholder="STREET ADDRESS (e.g. NO 50, JALAN TUN MAMAT 35/94)" autocomplete="shipping address-line1" required>
+                        <div class="addr-suggestions" id="reg-address-suggestions"></div>
+                        <div id="reg-housenum-note" class="housenum-estimate-note" style="display:none; font-size:0.72rem; color: var(--text-secondary); margin-top: 0.3rem;"></div>
+                    </div>
+                    <div class="input-row">
+                        <input type="text" id="reg-city" placeholder="CITY" autocomplete="shipping address-level2" required>
+                        <select id="reg-state" autocomplete="shipping address-level1" required>
+                            <option value="" disabled selected>STATE</option>
+                            <optgroup label="Semenanjung Malaysia (Peninsular)">
+                                <option value="Johor">Johor</option>
+                                <option value="Kedah">Kedah</option>
+                                <option value="Kelantan">Kelantan</option>
+                                <option value="Malacca">Malacca</option>
+                                <option value="Negeri Sembilan">Negeri Sembilan</option>
+                                <option value="Pahang">Pahang</option>
+                                <option value="Penang">Penang</option>
+                                <option value="Perak">Perak</option>
+                                <option value="Perlis">Perlis</option>
+                                <option value="Selangor">Selangor</option>
+                                <option value="Terengganu">Terengganu</option>
+                                <option value="Kuala Lumpur">Kuala Lumpur</option>
+                                <option value="Putrajaya">Putrajaya</option>
+                            </optgroup>
+                            <optgroup label="East Malaysia">
+                                <option value="Sabah">Sabah</option>
+                                <option value="Sarawak">Sarawak</option>
+                                <option value="Labuan">Labuan</option>
+                            </optgroup>
+                        </select>
+                        <input type="text" id="reg-zip" placeholder="POSTCODE" autocomplete="shipping postal-code" inputmode="numeric" maxlength="5" required>
+                    </div>
+                    <div class="addr-actions">
+                        <button type="button" class="addr-locate-btn" onclick="manualLocateAddress('reg', event)"><i class="fa-solid fa-map-location-dot"></i> VERIFY &amp; PIN ON MAP</button>
+                        <button type="button" class="addr-geo-btn" onclick="useMyCurrentLocation('reg', event)"><i class="fa-solid fa-location-crosshairs"></i> USE CURRENT LOCATION</button>
+                        <span class="addr-verified-badge" id="reg-addr-verified-badge">NOT VERIFIED</span>
+                    </div>
+                    <div class="addr-pin-map-wrap" id="reg-pin-map-wrap">
+                        <p class="addr-pin-hint"><i class="fa-solid fa-circle-info"></i> Drag the pin to your exact delivery entrance — this is the exact spot your order will be routed to.</p>
+                        <div class="addr-pin-map" id="reg-pin-map"></div>
+                    </div>
+                    <input type="hidden" id="reg-lat">
+                    <input type="hidden" id="reg-lng">
+                    <input type="hidden" id="reg-verified" value="0">
+                </div>
+
+                <h3 style="font-family: var(--font-heading); font-size: 0.9rem; margin: 1rem 0 0.5rem 0; color: var(--accent);">PAYMENT / BANK INFO</h3>
+                <input type="text" id="reg-bank" placeholder="BANK ACCOUNT / CARD NUMBER" autocomplete="cc-number" required>
+                <div class="input-row">
+                    <input type="text" id="reg-expiry" placeholder="EXPIRY DATE (MM/YY)" autocomplete="cc-exp" required>
+                    <input type="text" id="reg-cvv" placeholder="CVV" autocomplete="cc-csc" required>
+                </div>
+
+                <div id="signup-recaptcha-container" class="recaptcha-wrap"></div>
+                <div id="firebase-recaptcha-container"></div>
+
+                <button type="submit" class="btn-full">SIGN UP & CREATE PROFILE</button>
+                <div class="form-links">
+                    <span onclick="switchAuthView('login')">ALREADY HAVE AN ACCOUNT? LOGIN</span>
+                </div>
+            </form>
+
+            <form id="forgot-form" class="auth-form" onsubmit="handleForgotPassword(event)">
+                <h2 class="section-title">RESET PASSWORD</h2>
+                <input type="email" id="forgot-email" placeholder="EMAIL ADDRESS" autocomplete="email" required>
+                <div id="forgot-recaptcha-container" class="recaptcha-wrap"></div>
+                <button type="submit" class="btn-full">SEND LINK</button>
+                <div class="form-links"><span onclick="switchAuthView('login')">BACK TO LOGIN</span></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- PROFILE VIEW -->
+    <div id="profile-view" class="view">
+        <div class="profile-container">
+            <h2 class="section-title">MY ACCOUNT PROFILE</h2>
+            
+            <div class="profile-section-title">PERSONAL INFORMATION</div>
+            <div class="profile-field"><span>Full Name</span><span id="prof-disp-name">--</span></div>
+            <div class="profile-field"><span>Username</span><span id="prof-disp-username">--</span></div>
+            <div class="profile-field"><span>Email Address</span><span id="prof-disp-email">--</span></div>
+            <div class="profile-field"><span>Phone Number</span><span id="prof-disp-phone">--</span></div>
+
+            <div class="profile-section-title" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>SHIPPING ADDRESS</span>
+                <button type="button" onclick="openPasswordVerifyModal()" title="Update Address & Profile" style="background: none; border: none; color: var(--accent); cursor: pointer; font-size: 1.2rem;">
+                    <i class="fa-solid fa-pen-to-square"></i>
+                </button>
+            </div>
+            <div class="profile-field"><span>Street Address</span><span id="prof-disp-address">--</span></div>
+            <div class="profile-field"><span>City & State</span><span id="prof-disp-citystate">--</span></div>
+
+            <div class="profile-section-title">PAYMENT & BANKING DETAILS (CONFIDENTIAL)</div>
+            <div class="profile-field"><span>Card / Bank No.</span><span id="prof-disp-bank" style="letter-spacing: 1px; color: #818cf8;">--</span></div>
+            <div class="profile-field"><span>Expiry Date</span><span id="prof-disp-expiry">--</span></div>
+            <div class="profile-field"><span>CVV</span><span id="prof-disp-cvv">--</span></div>
+
+            <div style="margin-top: 2rem; display: flex; gap: 1rem; flex-wrap: wrap;">
+                <button type="button" class="btn-full" style="flex: 1 1 100%; background-color: #fff; color: #000;" onclick="goToMyOrders()"><i class="fa-solid fa-receipt"></i> VIEW PURCHASE HISTORY</button>
+                <button type="button" class="btn-full" style="flex: 1; background-color: var(--accent); color: #000;" onclick="openPasswordVerifyModal()">UPDATE PROFILE & ADDRESS</button>
+                <button type="button" class="btn-full" style="flex: 1; background-color: #ef4444; color: #fff;" onclick="logout()">LOGOUT</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MY PURCHASE HISTORY VIEW -->
+    <div id="orders-view" class="view">
+        <div class="orders-container">
+            <div class="orders-header">
+                <div>
+                    <h2 class="section-title" style="margin-bottom: 0.3rem;">MY PURCHASE HISTORY</h2>
+                    <small style="color: var(--text-secondary); font-size: 0.85rem;">Every order you've placed with VOID, newest first.</small>
+                </div>
+                <select id="my-orders-status-filter" class="orders-filter-select" onchange="renderMyOrders()">
+                    <option value="all">All Statuses</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Out for Delivery">Out for Delivery</option>
+                    <option value="Delivered">Delivered</option>
+                </select>
+            </div>
+            <div id="my-orders-list" class="my-orders-list">
+                <!-- Populated by renderMyOrders() -->
+            </div>
+        </div>
+    </div>
+
+    <!-- CHECKOUT VIEW -->
+    <div id="checkout-view" class="view">
+        <div class="checkout-container">
+            <h2 class="section-title">SECURE CHECKOUT</h2>
+            <form class="checkout-form" onsubmit="processPayment(event)">
+                <div class="form-section">
+                    <h3>1. CONTACT DETAILS</h3>
+                    <input type="text" id="chk-name" placeholder="FULL NAME" autocomplete="name" required>
+                    <input type="email" id="chk-email" placeholder="EMAIL ADDRESS" autocomplete="email" class="readonly-field" readonly required>
+                    <small style="color: var(--text-secondary); font-size: 0.72rem; display: block; margin: -0.5rem 0 0.8rem 0;">
+                        <i class="fa-solid fa-lock" style="margin-right: 4px;"></i>Order updates are sent to your verified account email.
+                    </small>
+                </div>
+                <div class="form-section">
+                    <h3>2. SHIPPING ADDRESS <span style="font-size:0.7rem; color: var(--text-secondary); font-weight:normal;">(this pin is where your order will be delivered)</span></h3>
+                    <div class="addr-group">
+                        <div class="addr-input-wrap">
+                            <input type="text" id="chk-address" placeholder="STREET ADDRESS (e.g. NO 50, JALAN TUN MAMAT 35/94)" autocomplete="shipping address-line1" required>
+                            <div class="addr-suggestions" id="chk-address-suggestions"></div>
+                            <div id="chk-housenum-note" class="housenum-estimate-note" style="display:none; font-size:0.72rem; color: var(--text-secondary); margin-top: 0.3rem;"></div>
+                        </div>
+                        <div class="input-row">
+                            <input type="text" id="chk-city" placeholder="CITY" autocomplete="shipping address-level2" required>
+                            <select id="chk-state" autocomplete="shipping address-level1" onchange="updateLorryBatchPreview()" required>
+                                <option value="" disabled selected>SELECT STATE</option>
+                                <optgroup label="Semenanjung Malaysia (Peninsular)">
+                                    <option value="Johor">Johor</option>
+                                    <option value="Kedah">Kedah</option>
+                                    <option value="Kelantan">Kelantan</option>
+                                    <option value="Malacca">Malacca</option>
+                                    <option value="Negeri Sembilan">Negeri Sembilan</option>
+                                    <option value="Pahang">Pahang</option>
+                                    <option value="Penang">Penang</option>
+                                    <option value="Perak">Perak</option>
+                                    <option value="Perlis">Perlis</option>
+                                    <option value="Selangor">Selangor</option>
+                                    <option value="Terengganu">Terengganu</option>
+                                    <option value="Kuala Lumpur">Kuala Lumpur</option>
+                                    <option value="Putrajaya">Putrajaya</option>
+                                </optgroup>
+                                <optgroup label="East Malaysia (Standard batching unavailable)">
+                                    <option value="Sabah">Sabah</option>
+                                    <option value="Sarawak">Sarawak</option>
+                                    <option value="Labuan">Labuan</option>
+                                </optgroup>
+                            </select>
+                            <input type="text" id="chk-zip" placeholder="POSTCODE" autocomplete="shipping postal-code" inputmode="numeric" maxlength="5" required>
+                        </div>
+                        <div class="addr-actions">
+                            <button type="button" class="addr-locate-btn" onclick="manualLocateAddress('chk', event)"><i class="fa-solid fa-map-location-dot"></i> VERIFY &amp; PIN ON MAP</button>
+                            <button type="button" class="addr-geo-btn" onclick="useMyCurrentLocation('chk', event)"><i class="fa-solid fa-location-crosshairs"></i> USE CURRENT LOCATION</button>
+                            <span class="addr-verified-badge" id="chk-addr-verified-badge">NOT VERIFIED</span>
+                        </div>
+                        <div class="addr-pin-map-wrap" id="chk-pin-map-wrap">
+                            <p class="addr-pin-hint"><i class="fa-solid fa-circle-info"></i> Drag the pin to your exact delivery entrance. Toll, fuel and route cost are calculated from this exact point.</p>
+                            <div class="addr-pin-map" id="chk-pin-map"></div>
+                        </div>
+                        <input type="hidden" id="chk-lat">
+                        <input type="hidden" id="chk-lng">
+                        <input type="hidden" id="chk-verified" value="0">
+                    </div>
+                </div>
+                <div class="form-section">
+                    <h3>3. DELIVERY METHOD</h3>
+                    <div class="delivery-method-options">
+                        <label class="delivery-method-card active" id="dm-instant-card" onclick="selectDeliveryMethod('instant')">
+                            <div class="dm-icon"><i class="fa-solid fa-bolt"></i></div>
+                            <div class="dm-info">
+                                <strong>INSTANT DELIVERY</strong>
+                                <span>Dispatched right away by motorcycle (up to 3 items) or car (4+ items). Fastest option, tracked door-to-door from the moment it leaves the hub. Note: an additional 8% delivery fee is added to the item price (free on orders RM750 &amp; above).</span>
+                            </div>
+                            <div class="dm-check"><i class="fa-solid fa-circle-check"></i></div>
+                        </label>
+                        <label class="delivery-method-card" id="dm-standard-card" onclick="selectDeliveryMethod('standard')">
+                            <div class="dm-icon"><i class="fa-solid fa-truck"></i></div>
+                            <div class="dm-info">
+                                <strong>STANDARD DELIVERY (2–4 DAYS)</strong>
+                                <span>Consolidated onto a delivery van with other orders heading to your state (up to 20 orders / 55 items per trip — a bigger lorry takes over automatically beyond that), and routed nearest-to-farthest. Note: an additional 5% delivery fee is added to the item price (free on orders RM750 &amp; above). Peninsular Malaysia only.</span>
+                            </div>
+                            <div class="dm-check"><i class="fa-solid fa-circle-check"></i></div>
+                        </label>
+                    </div>
+                    <div id="lorry-batch-preview" class="lorry-batch-preview" style="display:none;"></div>
+                    <input type="hidden" id="chk-delivery-method" value="instant">
+                </div>
+                <div class="checkout-summary">
+                    <div class="price-breakdown" id="price-breakdown">
+                        <div class="price-breakdown-row">
+                            <span>Subtotal</span>
+                            <span id="pb-subtotal">RM 0.00</span>
+                        </div>
+                        <div class="price-breakdown-row" id="pb-discount-row" style="display: none;">
+                            <span id="pb-discount-label">Bulk Discount</span>
+                            <span id="pb-discount" style="color: #4ade80;">-RM 0.00</span>
+                        </div>
+                        <div class="price-breakdown-row" id="pb-instant-surcharge-row" style="display: none;">
+                            <span id="pb-instant-surcharge-label">Delivery Fee</span>
+                            <span id="pb-instant-surcharge" style="color: #f59e0b;">+RM 0.00</span>
+                        </div>
+                        <div id="pb-instant-surcharge-note" class="pb-surcharge-note" style="display: none; font-size: 0.75rem; color: var(--text-secondary); margin: -0.4rem 0 0.4rem;"></div>
+                        <div class="price-breakdown-row">
+                            <span>SST (6% — Malaysia Sales &amp; Service Tax)</span>
+                            <span id="pb-sst">RM 0.00</span>
+                        </div>
+                        <div class="price-breakdown-row price-breakdown-total">
+                            <span>TOTAL</span>
+                            <span id="checkout-total-price">RM 0.00</span>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn-full">CONFIRM & PAY</button>
+                </div>
+            </form>
+        </div>
+    </div>
+                
+                <!-- Slide-out Cart -->
+    <div class="cart-sidebar" id="cart-sidebar">
+        <div class="cart-header">
+            <h2>YOUR CART</h2>
+            <button id="close-cart" class="close-btn">&times;</button>
+        </div>
+        <div class="cart-items" id="cart-items"></div>
+        <div class="cart-footer">
+            <div class="cart-total"><span>TOTAL:</span><span id="total-price">RM 0.00</span></div>
+            <button class="checkout-btn" onclick="goToCheckout()">PROCEED TO CHECKOUT</button>
+        </div>
+    </div>
+    <div class="overlay" id="overlay"></div>
+
+    <!-- LIVE CUSTOMER ORDER TRACKING VIEW -->
+    <div id="tracking-view" class="view">
+        <div class="tracking-container">
+            <div class="tracking-header">
+                <div>
+                    <h2 class="section-title" style="margin: 0; text-align: left;">LIVE FLEET TRACKING</h2>
+                    <p id="track-number-disp" style="color: var(--accent); font-family: monospace; font-size: 0.9rem; margin-top: 4px;">TRK-2026-0000</p>
+                </div>
+                <button id="tracking-back-btn" class="btn-full" style="width: auto; padding: 0.5rem 1rem;" onclick="navigateTo('orders')">← Back to Dashboard</button>
+            </div>
+            
+            <div class="route-metrics-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem;">
+                <div class="metric-card" style="background: var(--bg-secondary); padding: 1rem; border: 1px solid var(--border); border-radius: 6px; text-align: center;">
+                    <span style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase;">DISTANCE</span>
+                    <h3 id="metric-dist" style="font-family: var(--font-heading); color: #fff; margin-top: 4px;">0.00 km</h3>
+                </div>
+                <div class="metric-card" style="background: var(--bg-secondary); padding: 1rem; border: 1px solid var(--border); border-radius: 6px; text-align: center;">
+                    <span style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase;">EST. FUEL USED</span>
+                    <h3 id="metric-fuel" style="font-family: var(--font-heading); color: var(--accent); margin-top: 4px;">0.00 L</h3>
+                </div>
+                <div class="metric-card" style="background: var(--bg-secondary); padding: 1rem; border: 1px solid var(--border); border-radius: 6px; text-align: center;">
+                    <span style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase;">TOLL EXPENSE</span>
+                    <h3 id="metric-toll" style="font-family: var(--font-heading); color: #f59e0b; margin-top: 4px;">RM 0.00</h3>
+                </div>
+                <div class="metric-card" style="background: var(--bg-secondary); padding: 1rem; border: 1px solid var(--border); border-radius: 6px; text-align: center;">
+                    <span style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase;">TOTAL COST</span>
+                    <h3 id="metric-cost" style="font-family: var(--font-heading); color: #4ade80; margin-top: 4px;">RM 0.00</h3>
+                </div>
+            </div>
+
+            <div class="tracking-grid">
+                <div class="tracking-sidebar-panel">
+                    <div class="track-card">
+                        <h3><i class="fa-solid fa-truck-fast"></i> DISPATCH & VEHICLE</h3>
+                        <div class="profile-field"><span>Sender / Hub</span><span id="track-sender">VOID Central Hub, Shah Alam</span></div>
+                        <div class="profile-field"><span>Courier Name</span><span id="track-courier">--</span></div>
+                        <div class="profile-field"><span>Vehicle Type</span><span id="track-vehicle-type">--</span></div>
+                        <div class="profile-field"><span>Vehicle Plate No.</span><span id="track-plate" style="color: var(--accent); font-weight: bold;">--</span></div>
+                        <div class="profile-field"><span>Route Pattern</span><span id="track-pattern" style="color: #4ade80; font-weight: bold;">--</span></div>
+                    </div>
+
+                    <div class="track-card">
+                        <h3><i class="fa-solid fa-clock"></i> ESTIMATED ARRIVAL (ETA)</h3>
+                        <div style="font-size: 1.8rem; font-family: var(--font-heading); color: #fff; margin: 0.5rem 0;" id="track-eta">--</div>
+                        <p style="font-size: 0.8rem; color: #888;" id="track-status-desc">Loading tracking data...</p>
+                        <div id="track-traffic-banner" class="traffic-banner" style="display:none;"></div>
+                    </div>
+
+                    <div class="track-card">
+                        <h3><i class="fa-solid fa-map-pin"></i> DESTINATION</h3>
+                        <p id="track-dest-address" style="font-size: 0.9rem; color: #ccc; line-height: 1.4; margin-top: 5px;">--</p>
+                    </div>
+                </div>
+
+                <div class="tracking-map-panel" style="position: relative;">
+                    <div id="map" style="width: 100%; height: 100%; min-height: 480px; border-radius: 4px; z-index: 1;"></div>
+                </div>
+            </div>
+
+            <!-- LORRY BATCH MANIFEST -->
+            <div class="tracking-grid" id="lorry-manifest-grid" style="display:none; margin-top: 1.5rem;">
+                <div class="track-card">
+                    <h3><i class="fa-solid fa-boxes-stacked"></i> DELIVERY MANIFEST</h3>
+                    <div id="lorry-manifest-list" class="lorry-manifest-list"></div>
+                </div>
+                <div class="track-card">
+                    <h3><i class="fa-solid fa-road"></i> PATHWAY HISTORY</h3>
+                    <div id="lorry-history-list" class="lorry-history-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- OVERVIEW MODAL POP-UP (Admin Sales History "Overview" column) -->
+    <div id="order-detail-modal" class="modal-overlay">
+        <div class="notif-modal-content" style="max-width: 560px;">
+            <div class="notif-modal-header">
+                <h3 id="order-modal-title"><i class="fa-solid fa-receipt" style="color:var(--accent); margin-right:8px;"></i> OVERVIEW</h3>
+                <span class="close-notif-modal" onclick="closeOrderDetailModal()">&times;</span>
+            </div>
+            <div class="notif-modal-body" id="order-modal-body"></div>
+            <div class="notif-modal-footer">
+                <button type="button" class="btn-full" onclick="closeOrderDetailModal()" style="background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border);">CLOSE</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- RATE & REVIEW ITEM MODAL (used from both Purchase History and Product Page) -->
+    <div id="rate-item-modal" class="modal-overlay">
+        <div class="notif-modal-content" style="max-width: 460px;">
+            <div class="notif-modal-header">
+                <h3><i class="fa-solid fa-star" style="color:var(--accent); margin-right:8px;"></i> RATE & REVIEW</h3>
+                <span class="close-notif-modal" onclick="closeRateItemModal()">&times;</span>
+            </div>
+            <div class="notif-modal-body">
+                <div class="rate-item-context">
+                    <img id="rate-item-image" src="" alt="" class="rate-item-context-img">
+                    <div>
+                        <div id="rate-item-name" class="rate-item-context-name"></div>
+                        <small style="color: var(--text-secondary);">Verified Purchase — only buyers whose items have been delivered can review.</small>
+                    </div>
+                </div>
+                <form id="rate-item-form" onsubmit="submitItemReview(event)">
+                    <input type="hidden" id="rate-item-product-id">
+                    <input type="hidden" id="rate-item-order-id">
+                    <select id="rate-item-size-select" style="width: 100%; padding: 0.7rem; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border); margin: 1rem 0 1rem;"></select>
+                    <select id="rate-item-rating" required style="width: 100%; padding: 0.7rem; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border); margin-bottom: 1rem;">
+                        <option value="5">★★★★★ (5 Stars)</option>
+                        <option value="4">★★★★☆ (4 Stars)</option>
+                        <option value="3">★★★☆☆ (3 Stars)</option>
+                        <option value="2">★★☆☆☆ (2 Stars)</option>
+                        <option value="1">★☆☆☆☆ (1 Star)</option>
+                    </select>
+                    <textarea id="rate-item-comment" placeholder="Write your review here..." required rows="3" style="width: 100%; padding: 0.7rem; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border); margin-bottom: 1rem; resize: vertical;"></textarea>
+                    <button type="submit" class="btn-full">SUBMIT REVIEW</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- NOTIFICATION DETAIL MODAL POP-UP -->
+    <div id="notif-modal-overlay" class="modal-overlay">
+        <div class="notif-modal-content">
+            <div class="notif-modal-header">
+                <h3 id="notif-modal-title"><i class="fa-solid fa-bell" style="color:var(--accent); margin-right:8px;"></i> NOTIFICATION DETAIL</h3>
+                <span class="close-notif-modal" onclick="closeNotificationDetail()">&times;</span>
+            </div>
+            <div class="notif-modal-body">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.8rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border);">
+                    <small id="notif-modal-date" style="color: var(--text-secondary); font-size: 0.8rem;"></small>
+                    <span id="notif-modal-badge" class="status-badge"></span>
+                </div>
+                <div id="notif-modal-message"></div>
+            </div>
+            <div class="notif-modal-footer">
+                <button type="button" class="btn-full" onclick="closeNotificationDetail()" style="background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border);">CLOSE</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PASSWORD VERIFICATION MODAL FOR PROFILE & ADDRESS UPDATE -->
+    <div id="password-verify-modal" class="modal-overlay">
+        <div class="notif-modal-content" style="max-width: 400px;">
+            <div class="notif-modal-header">
+                <h3><i class="fa-solid fa-lock" style="color:var(--accent); margin-right:8px;"></i> SECURITY VERIFICATION</h3>
+                <span class="close-notif-modal" onclick="closePasswordVerifyModal()">&times;</span>
+            </div>
+            <div class="notif-modal-body">
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">Please enter your account password to authorize profile and address updates.</p>
+                <form onsubmit="verifyPasswordAndOpenUpdate(event)">
+                    <input type="password" id="verify-pass-input" placeholder="ENTER PASSWORD" required style="width: 100%; padding: 0.7rem; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border); margin-bottom: 1rem;">
+                    <button type="submit" class="btn-full">VERIFY PASSWORD</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- PROFILE & ADDRESS EDIT MODAL -->
+    <div id="edit-profile-modal" class="modal-overlay">
+        <div class="notif-modal-content" style="max-width: 500px;">
+            <div class="notif-modal-header">
+                <h3><i class="fa-solid fa-user-pen" style="color:var(--accent); margin-right:8px;"></i> UPDATE PROFILE & ADDRESS</h3>
+                <span class="close-notif-modal" onclick="closeEditProfileModal()">&times;</span>
+            </div>
+            <div class="notif-modal-body">
+                <form onsubmit="handleUpdateProfile(event)" style="display: flex; flex-direction: column; gap: 0.8rem;">
+                    <input type="text" id="edit-name" placeholder="FULL NAME" required style="width: 100%; padding: 0.7rem; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border);">
+
+                    <div class="field-with-verify">
+                        <input type="email" id="edit-email" placeholder="EMAIL ADDRESS" required style="width: 100%; padding: 0.7rem; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border);">
+                        <button type="button" class="verify-field-btn" onclick="startEmailVerification('edit', event)">VERIFY</button>
+                    </div>
+                    <div class="field-verify-status" style="margin-top: -0.4rem;">
+                        <span class="field-verified-badge" id="edit-email-badge">NOT VERIFIED</span>
+                    </div>
+                    <input type="hidden" id="edit-email-verified" value="0">
+
+                    <div class="field-with-verify">
+                        <input type="text" id="edit-phone" placeholder="PHONE NUMBER" required style="width: 100%; padding: 0.7rem; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border);">
+                        <button type="button" class="verify-field-btn" onclick="startPhoneVerification('edit', event)">VERIFY</button>
+                    </div>
+                    <div class="field-verify-status" style="margin-top: -0.4rem;">
+                        <span class="field-verified-badge" id="edit-phone-badge">NOT VERIFIED</span>
+                    </div>
+                    <input type="hidden" id="edit-phone-verified" value="0">
+                    
+                    <h4 style="font-family: var(--font-heading); font-size: 0.85rem; margin-top: 0.5rem; color: var(--accent);">SHIPPING ADDRESS (VALIDATED)</h4>
+                    <div class="addr-group" style="margin-bottom: 0;">
+                        <div class="addr-input-wrap">
+                            <input type="text" id="edit-address" placeholder="STREET ADDRESS (e.g. NO 50, JALAN TUN MAMAT 35/94)" required style="width: 100%; padding: 0.7rem; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border);">
+                            <div class="addr-suggestions" id="edit-address-suggestions"></div>
+                            <div id="edit-housenum-note" class="housenum-estimate-note" style="display:none; font-size:0.72rem; color: var(--text-secondary); margin-top: 0.3rem;"></div>
+                        </div>
+                        <div style="display: flex; gap: 10px; margin-top: 0.8rem;">
+                            <input type="text" id="edit-city" placeholder="CITY" required style="flex: 1; padding: 0.7rem; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border);">
+                            <select id="edit-state" required style="flex: 1; padding: 0.7rem; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border);">
+                                <option value="" disabled selected>STATE</option>
+                                <optgroup label="Semenanjung Malaysia (Peninsular)">
+                                    <option value="Johor">Johor</option>
+                                    <option value="Kedah">Kedah</option>
+                                    <option value="Kelantan">Kelantan</option>
+                                    <option value="Malacca">Malacca</option>
+                                    <option value="Negeri Sembilan">Negeri Sembilan</option>
+                                    <option value="Pahang">Pahang</option>
+                                    <option value="Penang">Penang</option>
+                                    <option value="Perak">Perak</option>
+                                    <option value="Perlis">Perlis</option>
+                                    <option value="Selangor">Selangor</option>
+                                    <option value="Terengganu">Terengganu</option>
+                                    <option value="Kuala Lumpur">Kuala Lumpur</option>
+                                    <option value="Putrajaya">Putrajaya</option>
+                                </optgroup>
+                                <optgroup label="East Malaysia">
+                                    <option value="Sabah">Sabah</option>
+                                    <option value="Sarawak">Sarawak</option>
+                                    <option value="Labuan">Labuan</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                        <input type="text" id="edit-zip" placeholder="POSTCODE / ZIP (5 Digits)" required style="width: 100%; padding: 0.7rem; margin-top: 0.8rem; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border);">
+                        <div class="addr-actions">
+                            <button type="button" class="addr-locate-btn" onclick="manualLocateAddress('edit', event)"><i class="fa-solid fa-map-location-dot"></i> VERIFY &amp; PIN ON MAP</button>
+                            <button type="button" class="addr-geo-btn" onclick="useMyCurrentLocation('edit', event)"><i class="fa-solid fa-location-crosshairs"></i> USE CURRENT LOCATION</button>
+                            <span class="addr-verified-badge" id="edit-addr-verified-badge">NOT VERIFIED</span>
+                        </div>
+                        <div class="addr-pin-map-wrap" id="edit-pin-map-wrap">
+                            <p class="addr-pin-hint"><i class="fa-solid fa-circle-info"></i> Drag the pin to your exact delivery entrance.</p>
+                            <div class="addr-pin-map" id="edit-pin-map"></div>
+                        </div>
+                        <input type="hidden" id="edit-lat">
+                        <input type="hidden" id="edit-lng">
+                        <input type="hidden" id="edit-verified" value="0">
+                    </div>
+
+                    <button type="submit" class="btn-full" style="margin-top: 1rem;">SAVE UPDATED PROFILE</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- OTP VERIFICATION MODAL (used for both email and phone verification) -->
+    <div id="otp-verify-modal" class="modal-overlay">
+        <div class="notif-modal-content" style="max-width: 420px;">
+            <div class="notif-modal-header">
+                <h3 id="otp-modal-title"><i class="fa-solid fa-shield-halved" style="color:var(--accent); margin-right:8px;"></i> VERIFY YOUR EMAIL</h3>
+                <span class="close-notif-modal" onclick="closeOtpModal()">&times;</span>
+            </div>
+            <div class="notif-modal-body">
+                <p id="otp-modal-desc" style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 1rem;"></p>
+                <div id="otp-demo-note" class="otp-demo-note"></div>
+                <input type="text" id="otp-code-input" class="otp-code-input" placeholder="------" maxlength="6" inputmode="numeric" autocomplete="one-time-code">
+                <div id="otp-error-msg" class="otp-error-msg"></div>
+                <button type="button" class="btn-full" onclick="submitOtpCode()" style="margin-top: 0.8rem;">VERIFY CODE</button>
+                <div class="otp-resend-row">
+                    <span id="otp-resend-link" onclick="resendOtpCode()">Resend Code</span>
+                    <span id="otp-resend-timer"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="site-footer">
+        <div class="footer-inner">
+            <div class="footer-col footer-brand">
+                <div class="footer-logo">VOID.</div>
+                <p class="footer-tagline">Streetwear built for the underground. Designed in the shadows, worn in the light.</p>
+                <div class="footer-socials">
+                    <a href="#" title="Instagram"><i class="fa-brands fa-instagram"></i></a>
+                    <a href="#" title="TikTok"><i class="fa-brands fa-tiktok"></i></a>
+                    <a href="#" title="X / Twitter"><i class="fa-brands fa-x-twitter"></i></a>
+                    <a href="#" title="WhatsApp"><i class="fa-brands fa-whatsapp"></i></a>
+                </div>
+            </div>
+
+            <div class="footer-col footer-contact-info">
+                <h4>GET IN TOUCH</h4>
+                <p><i class="fa-solid fa-envelope"></i> support@voidstreetwear.com</p>
+                <p><i class="fa-solid fa-phone"></i> +60 12-345 6789</p>
+                <p><i class="fa-solid fa-location-dot"></i> Petaling Jaya, Selangor, Malaysia</p>
+                <p><i class="fa-solid fa-clock"></i> Mon – Sat, 10AM – 7PM</p>
+            </div>
+
+            <div class="footer-col footer-inquiry">
+                <h4>SEND US AN INQUIRY</h4>
+                <form id="footer-inquiry-form" onsubmit="submitInquiry(event)">
+                    <input type="text" id="inquiry-name" placeholder="YOUR NAME" required>
+                    <input type="email" id="inquiry-email" placeholder="YOUR EMAIL" required>
+                    <textarea id="inquiry-message" placeholder="YOUR MESSAGE" rows="3" required></textarea>
+                    <button type="submit" class="btn-full footer-inquiry-btn">SEND MESSAGE</button>
+                    <p id="inquiry-success-msg" class="inquiry-success-msg">Thanks! Your inquiry has been sent — we'll get back to you shortly.</p>
+                </form>
+            </div>
+        </div>
+
+        <div class="footer-bottom">
+            <p>&copy; 2026 VOID Streetwear. All rights reserved.</p>
+        </div>
+    </footer>
+    
+<!-- EmailJS SDK for Real OTP Emails -->
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+<script>
+    (function(){
+        // You will need to create a free account at emailjs.com and put your Public Key here later
+        emailjs.init("xdX-B11WOlph_97qD"); 
+    })();
+</script>
+
+
+
+<!-- FIREBASE SDK & EDA WEBSOCKET SETUP -->
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
+    import { getDatabase, ref, set, onValue, get } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-database.js";
+    // NEW: Import Firebase Authentication for Real SMS
+    import { getAuth, RecaptchaVerifier, signInWithPhoneNumber } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyClEdgWwQAsIoSjS06_C80NdejAw-e2kig",
+      authDomain: "void-logistics-shaan.firebaseapp.com",
+      databaseURL: "https://void-logistics-shaan-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "void-logistics-shaan",
+      storageBucket: "void-logistics-shaan.firebasestorage.app",
+      messagingSenderId: "956865655329",
+      appId: "1:956865655329:web:07ba9ca251068ea9e92960",
+      measurementId: "G-8MJWY4DG8M"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const auth = getAuth(app); // Initialize Auth
+
+    // Make Firebase available to script.js
+    window.firebaseDb = db;
+    window.dbRef = ref;
+    window.dbSet = set;
+    window.dbOnValue = onValue;
+    window.dbGet = get;
+    
+    // Make Auth available to script.js
+    window.firebaseAuth = auth;
+    window.RecaptchaVerifier = RecaptchaVerifier;
+    window.signInWithPhoneNumber = signInWithPhoneNumber;
+</script>
+    <script src="firebase-store.js"></script>
+    <script src="index.js"></script>
+</body>
+</html>

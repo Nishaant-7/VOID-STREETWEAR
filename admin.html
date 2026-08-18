@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VOID Admin Dashboard</title>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Syncopate:wght@700&family=Space+Grotesk:wght@400;600&display=swap" rel="stylesheet">
+    
+    <!-- Leaflet CSS & JS for Live Tracking -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Chart.js for Admin Analytics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- SECURITY GUARD: Kicks out unauthorized users -->
+    <script>
+        let checkUser = null;
+        try {
+            checkUser = JSON.parse(sessionStorage.getItem('void_current_user') || 'null');
+        } catch (error) {
+            sessionStorage.removeItem('void_current_user');
+        }
+        if (!checkUser || checkUser.role !== 'admin') {
+            window.location.replace('admin-login.html');
+        }
+    </script>
+
+    <!-- Secure Admin Navigation -->
+    <nav class="navbar">
+        <div class="logo" onclick="window.location.href='index.html'">VOID.</div>
+        <div class="nav-controls" style="position: relative; display: flex; align-items: center;">
+            <ul class="nav-links" id="nav-links" style="margin-right: 20px;">
+                <li><a href="#" class="active" style="color: var(--accent); cursor: default;">SECURE ADMIN DASHBOARD</a></li>
+            </ul>
+            
+            <!-- Admin Logout Button -->
+            <div class="notif-icon" onclick="logout()" title="Admin Logout" style="cursor: pointer; display: flex; align-items: center;">
+                <i class="fa-solid fa-right-from-bracket" style="font-size: 1.2rem; color: #ef4444;"></i>
+            </div>
+            
+            <div class="hamburger" onclick="toggleMenu()">☰</div>
+        </div>
+    </nav>
+
+    <!-- ADMIN VIEW -->
+    <div id="admin-view" class="view active">
+        <div class="admin-layout">
+            <aside class="admin-sidebar">
+                <h2>ADMIN</h2>
+               <ul class="admin-nav">
+                    <li onclick="switchAdminTab('dashboard')" class="admin-tab-btn active">Analytics</li>
+                    <li onclick="switchAdminTab('cost-analytics')" class="admin-tab-btn">Transport Costs</li>
+                    <li onclick="switchAdminTab('products')" class="admin-tab-btn">Products</li>
+                    <li onclick="switchAdminTab('slides')" class="admin-tab-btn">Hero Slides</li>
+                    <li onclick="switchAdminTab('users')" class="admin-tab-btn">Users</li>
+                    <li onclick="switchAdminTab('sales-history')" class="admin-tab-btn">Sales History</li>
+                    <li onclick="switchAdminTab('lorry-batches')" class="admin-tab-btn">Lorry Batches</li>
+                    
+                    <li><a href="admin-create.html" style="color: var(--accent); text-decoration: none;">CREATE ADMIN ACCOUNT</a></li>
+                    <li style="margin-top: 2rem;">
+                        <a href="index.html" class="btn-full" style="text-align: center; display: block; text-decoration: none; font-size: 0.8rem; background-color: var(--border); color: #fff;">← BACK TO STORE</a>
+                    </li>
+                </ul>
+            </aside>
+            <div class="admin-content">
+                
+                <!-- Dashboard Tab -->
+                <div id="admin-dashboard" class="admin-tab active">
+                    <h2 class="section-title">SALES & SIGNUPS</h2>
+                    <div class="stats-grid">
+                        <div class="stat-card clickable-stat" onclick="jumpToSalesHistory('monthly')">
+                            <h3>MONTHLY SALES</h3>
+                            <p id="stat-monthly-sales">RM 0.00</p>
+                            <small style="color: #818cf8; font-size: 0.75rem;">View History →</small>
+                        </div>
+                        <div class="stat-card clickable-stat" onclick="jumpToSalesHistory('yearly')">
+                            <h3>YEARLY SALES</h3>
+                            <p id="stat-yearly-sales">RM 0.00</p>
+                            <small style="color: #818cf8; font-size: 0.75rem;">View History →</small>
+                        </div>
+                        <div class="stat-card clickable-stat" onclick="switchAdminTab('users')">
+                            <h3>TOTAL USERS</h3>
+                            <p id="stat-total-users">0</p>
+                            <small style="color: #818cf8; font-size: 0.75rem;">View Database →</small>
+                        </div>
+                    </div>
+                    
+                    <div class="charts-grid">
+                        <div class="chart-container">
+                            <h3 style="margin-bottom: 1rem; font-family: var(--font-heading);">SALES TREND (REVENUE)</h3>
+                            <div class="chart-canvas-wrap">
+                                <canvas id="salesChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="chart-container">
+                            <h3 style="margin-bottom: 1rem; font-family: var(--font-heading);">NEW USERS</h3>
+                            <div class="chart-canvas-wrap">
+                                <canvas id="signupChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="chart-container chart-container-wide">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.6rem;">
+                                <h3 style="font-family: var(--font-heading);">CATEGORY SALES SHARE</h3>
+                                <select id="timeframe-select" onchange="updateCategoryChart()" style="padding: 0.3rem 0.6rem; background: #222; color: #fff; border: 1px solid #444; font-family: var(--font-main);">
+                                    <option value="year">Full Year (2026)</option>
+                                    <option value="month">Current Month</option>
+                                </select>
+                            </div>
+                            <div class="chart-canvas-wrap chart-canvas-wrap-pie">
+                                <canvas id="categoryChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Transport Cost Analytics Tab -->
+                <div id="admin-cost-analytics" class="admin-tab">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+                        <div>
+                            <h2 class="section-title" style="margin: 0 0 0.3rem 0;">TRANSPORT COST ANALYTICS</h2>
+                            <small style="color: var(--text-secondary); font-size: 0.8rem;">Fuel, toll & total delivery cost by vehicle type - use this to spot where to cut costs.</small>
+                        </div>
+                        <div class="cost-granularity-toggle">
+                            <button class="cost-granularity-btn" data-granularity="day" onclick="setCostAnalyticsGranularity('day')">DAY</button>
+                            <button class="cost-granularity-btn active" data-granularity="month" onclick="setCostAnalyticsGranularity('month')">MONTH</button>
+                            <button class="cost-granularity-btn" data-granularity="year" onclick="setCostAnalyticsGranularity('year')">YEAR</button>
+                        </div>
+                    </div>
+
+                    <h3 class="cost-section-label" id="cost-summary-heading">ALL-TIME TOTALS BY VEHICLE TYPE</h3>
+                    <div class="vehicle-cost-grid" id="cost-summary-cards"></div>
+
+                    <div class="chart-container chart-container-wide" style="margin-top: 1.5rem;">
+                        <h3 style="margin-bottom: 1rem; font-family: var(--font-heading);">COST TREND BY VEHICLE TYPE</h3>
+                        <div class="chart-canvas-wrap">
+                            <canvas id="costAnalyticsChart"></canvas>
+                        </div>
+                    </div>
+
+                    <h3 class="cost-section-label" style="margin-top: 1.5rem;">PERIOD BREAKDOWN</h3>
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th>Period</th>
+                                <th>Vehicle</th>
+                                <th>Deliveries</th>
+                                <th>Distance</th>
+                                <th>Fuel Used</th>
+                                <th>Fuel Cost</th>
+                                <th>Toll Cost</th>
+                                <th>Total Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cost-analytics-table-body"></tbody>
+                    </table>
+                </div>
+
+                <!-- Products Tab -->
+                <div id="admin-products" class="admin-tab">
+                    <h2 class="section-title">MANAGE PRODUCTS</h2>
+                    <div class="admin-add-product">
+                        <h3>ADD NEW ITEM</h3>
+                        <form onsubmit="adminAddProduct(event)" class="admin-form">
+                            <input type="text" id="add-name" placeholder="Item Name" required>
+                            <div class="input-row">
+                                <input type="number" id="add-price" placeholder="Price (RM)" step="0.01" required>
+                                <select id="add-category" required>
+                                    <option value="" disabled selected>Category</option>
+                                    <option value="tops">Tops</option>
+                                    <option value="bottoms">Bottoms</option>
+                                    <option value="outerwear">Outerwear</option>
+                                </select>
+                            </div>
+                            <div class="input-row">
+                                <input type="number" id="add-promo-price" placeholder="Promotion Price (RM) — optional" step="0.01" min="0">
+                            </div>
+
+                            <div class="input-row">
+                                <div class="image-upload-field">
+                                    <label for="add-image-file" class="image-upload-label">
+                                        <i class="fa-solid fa-upload"></i> CHOOSE IMAGE FROM DEVICE
+                                    </label>
+                                    <input type="file" id="add-image-file" accept="image/*" onchange="handleImageFileSelect(event, 'add')" style="display:none;">
+                                    <div class="image-upload-preview" id="add-image-preview">
+                                        <span class="image-upload-placeholder">No image selected</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <label style="font-family: var(--font-heading); font-size: 0.8rem; display: block; margin-bottom: 0.5rem; color: var(--accent);">STOCK QUANTITY PER SIZE</label>
+                            <div class="input-row size-stock-inputs">
+                                <div class="size-stock-field"><label for="add-stock-s">S</label><input type="number" id="add-stock-s" min="0" value="0" required></div>
+                                <div class="size-stock-field"><label for="add-stock-m">M</label><input type="number" id="add-stock-m" min="0" value="0" required></div>
+                                <div class="size-stock-field"><label for="add-stock-l">L</label><input type="number" id="add-stock-l" min="0" value="0" required></div>
+                                <div class="size-stock-field"><label for="add-stock-xl">XL</label><input type="number" id="add-stock-xl" min="0" value="0" required></div>
+                            </div>
+
+                            <textarea id="add-desc" rows="6" placeholder="Item Description (Size details, materials, fit...)" required style="resize: vertical; min-height: 120px;"></textarea>
+                            <button type="submit" class="btn-full">ADD PRODUCT</button>
+                        </form>
+                    </div>
+                    <h3>CURRENT INVENTORY</h3>
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th>Item</th>
+                                <th>Price</th>
+                                <th>Promo Price</th>
+                                <th>S</th>
+                                <th>M</th>
+                                <th>L</th>
+                                <th>XL</th>
+                                <th>Total Stock</th>
+                                <th>Status</th>
+                                <th style="text-align: center;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-product-list"></tbody>
+                    </table>
+                </div>
+
+                <!-- Hero Slides Tab -->
+                <div id="admin-slides" class="admin-tab">
+                    <h2 class="section-title">MANAGE HERO SLIDES & BRAND NEWS</h2>
+                    <div class="admin-add-product">
+                        <h3>ADD NEW SLIDE / BANNER</h3>
+                        <form onsubmit="adminAddSlide(event)" class="admin-form">
+                            <input type="text" id="slide-title" placeholder="Slide Title (e.g. URBAN DECAY)" required>
+                            <input type="text" id="slide-subtitle" placeholder="News / Subtitle (e.g. SS/26 COLLECTION OUT NOW)" required>
+
+                            <div class="image-upload-field">
+                                <label for="slide-image-file" class="image-upload-label">
+                                    <i class="fa-solid fa-upload"></i> CHOOSE IMAGE FROM DEVICE
+                                </label>
+                                <input type="file" id="slide-image-file" accept="image/*" onchange="handleImageFileSelect(event, 'slide')" style="display:none;">
+                                <div class="image-upload-preview" id="slide-image-preview">
+                                    <span class="image-upload-placeholder">No image selected</span>
+                                </div>
+                            </div>
+                            
+                            <div class="input-row">
+                                <input type="text" id="slide-btnText" placeholder="Button Text (e.g. SHOP THE DROP)" required>
+                                <select id="slide-link-type" onchange="toggleSlideTargetField()" required>
+                                    <option value="shop" selected>Redirect Option: Main Shop Catalog</option>
+                                    <option value="item">Redirect Option: Specific Item Page</option>
+                                </select>
+                            </div>
+
+                            <div id="slide-shop-target" style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:1rem;">
+                                Button will redirect and scroll down to full shop section.
+                            </div>
+
+                            <div id="slide-item-target" style="display:none; margin-bottom:1rem;">
+                                <select id="slide-item-select">
+                                    <option value="" disabled selected>Select Specific Item Page</option>
+                                </select>
+                            </div>
+
+                            <button type="submit" class="btn-full">ADD HERO SLIDE</button>
+                        </form>
+                    </div>
+                    <h3>ACTIVE BANNER SLIDES</h3>
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th>Preview</th>
+                                <th>Title & Subtitle</th>
+                                <th>Button Text</th>
+                                <th>Button Redirect Target</th>
+                                <th style="text-align: center;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-slide-list"></tbody>
+                    </table>
+                </div>
+
+                <!-- Users Tab -->
+                <div id="admin-users" class="admin-tab">
+                    <h2 class="section-title">USER DATABASE</h2>
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th>Username</th>
+                                <th>Email</th>
+                                <th>Phone Number</th>
+                                <th>Address</th>
+                                <th>State</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-user-list"></tbody>
+                    </table>
+                </div>
+
+                <!-- Sales History Tab -->
+                <div id="admin-sales-history" class="admin-tab">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+                        <h2 class="section-title" style="margin: 0;">SALES HISTORY & FULFILLMENT</h2>
+                        <div style="display: flex; gap: 1rem;">
+                            <!-- Month Filter -->
+                            <select id="sales-month-filter" onchange="renderAdminSalesHistory()" style="padding: 0.4rem 0.8rem; background: #141414; color: #fff; border: 1px solid #333; font-family: var(--font-main);">
+                                <option value="all">All Months</option>
+                                <option value="Jan">January</option>
+                                <option value="Feb">February</option>
+                                <option value="Mar">March</option>
+                                <option value="Apr">April</option>
+                                <option value="May">May</option>
+                                <option value="Jun">June</option>
+                                <option value="Jul">July</option>
+                                <option value="Aug">August</option>
+                                <option value="Sep">September</option>
+                                <option value="Oct">October</option>
+                                <option value="Nov">November</option>
+                                <option value="Dec">December</option>
+                            </select>
+                            <!-- Year Filter -->
+                            <select id="sales-year-filter" onchange="renderAdminSalesHistory()" style="padding: 0.4rem 0.8rem; background: #141414; color: #fff; border: 1px solid #333; font-family: var(--font-main);">
+                                <option value="all">All Years</option>
+                                <option value="2026" selected>2026</option>
+                                <option value="2025">2025</option>
+                            </select>
+                        </div>
+                    </div>
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th>Order ID</th>
+                                <th>Customer Name</th>
+                                <th>Tracking Number</th>
+                                <th>Address</th>
+                                <th>Delivery</th>
+                                <th>Amount</th>
+                                <th>Date & Time</th>
+                                <th style="text-align: center;">Overview</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-sales-list"></tbody>
+                    </table>
+                </div>
+
+                <!-- Lorry Batches Tab -->
+                <div id="admin-lorry-batches" class="admin-tab">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; flex-wrap: wrap; gap: 1rem;">
+                        <h2 class="section-title" style="margin: 0;">STANDARD DELIVERY — LORRY BATCHES</h2>
+                    </div>
+                    <small style="color: var(--text-secondary); font-size: 0.8rem; display:block; margin-bottom: 1.5rem;">
+                        Orders placed with Standard Delivery are grouped by state and go out by van by default. A batch that grows past capacity automatically upgrades to a lorry. Dispatch a batch once it's ready.
+                    </small>
+                    <div id="admin-lorry-batches-list" class="lorry-batches-admin-list"></div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- LIVE TRACKING MAP VIEW FOR ADMIN DISPATCH -->
+    <div id="tracking-view" class="view">
+        <div class="tracking-container">
+            <div class="tracking-header">
+                <div>
+                    <h2 class="section-title" style="margin: 0; text-align: left;">LIVE FLEET TRACKING</h2>
+                    <p id="track-number-disp" style="color: var(--accent); font-family: monospace; font-size: 0.9rem; margin-top: 4px;">TRK-2026-0000</p>
+                </div>
+                <button id="tracking-back-btn" class="btn-full" style="width: auto; padding: 0.5rem 1rem;" onclick="navigateTo('admin')">← Back to Dashboard</button>
+            </div>
+            
+            <div class="route-metrics-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem;">
+                <div class="metric-card" style="background: var(--bg-secondary); padding: 1rem; border: 1px solid var(--border); border-radius: 6px; text-align: center;">
+                    <span style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase;">DISTANCE</span>
+                    <h3 id="metric-dist" style="font-family: var(--font-heading); color: #fff; margin-top: 4px;">0.00 km</h3>
+                </div>
+                <div class="metric-card" style="background: var(--bg-secondary); padding: 1rem; border: 1px solid var(--border); border-radius: 6px; text-align: center;">
+                    <span style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase;">EST. FUEL USED</span>
+                    <h3 id="metric-fuel" style="font-family: var(--font-heading); color: var(--accent); margin-top: 4px;">0.00 L</h3>
+                </div>
+                <div class="metric-card" style="background: var(--bg-secondary); padding: 1rem; border: 1px solid var(--border); border-radius: 6px; text-align: center;">
+                    <span style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase;">TOLL EXPENSE</span>
+                    <h3 id="metric-toll" style="font-family: var(--font-heading); color: #f59e0b; margin-top: 4px;">RM 0.00</h3>
+                </div>
+                <div class="metric-card" style="background: var(--bg-secondary); padding: 1rem; border: 1px solid var(--border); border-radius: 6px; text-align: center;">
+                    <span style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase;">TOTAL COST</span>
+                    <h3 id="metric-cost" style="font-family: var(--font-heading); color: #4ade80; margin-top: 4px;">RM 0.00</h3>
+                </div>
+            </div>
+
+            <div class="tracking-grid">
+                <div class="tracking-sidebar-panel">
+                    <div class="track-card">
+                        <h3><i class="fa-solid fa-truck-fast"></i> DISPATCH & VEHICLE</h3>
+                        <div class="profile-field"><span>Sender / Hub</span><span id="track-sender">VOID Central Hub, Shah Alam</span></div>
+                        <div class="profile-field"><span>Courier Name</span><span id="track-courier">--</span></div>
+                        <div class="profile-field"><span>Vehicle Type</span><span id="track-vehicle-type">--</span></div>
+                        <div class="profile-field"><span>Vehicle Plate No.</span><span id="track-plate" style="color: var(--accent); font-weight: bold;">--</span></div>
+                        <div class="profile-field"><span>Route Pattern</span><span id="track-pattern" style="color: #4ade80; font-weight: bold;">--</span></div>
+                    </div>
+
+                    <div class="track-card">
+                        <h3><i class="fa-solid fa-clock"></i> ESTIMATED ARRIVAL (ETA)</h3>
+                        <div style="font-size: 1.8rem; font-family: var(--font-heading); color: #fff; margin: 0.5rem 0;" id="track-eta">--</div>
+                        <p style="font-size: 0.8rem; color: #888;" id="track-status-desc">Loading tracking data...</p>
+                        <div id="track-traffic-banner" class="traffic-banner" style="display:none;"></div>
+                    </div>
+
+                    <div class="track-card">
+                        <h3><i class="fa-solid fa-map-pin"></i> DESTINATION</h3>
+                        <p id="track-dest-address" style="font-size: 0.9rem; color: #ccc; line-height: 1.4; margin-top: 5px;">--</p>
+                    </div>
+                </div>
+
+                <div class="tracking-map-panel" style="position: relative;">
+                    <div id="map" style="width: 100%; height: 100%; min-height: 480px; border-radius: 4px; z-index: 1;"></div>
+                </div>
+            </div>
+
+            <!-- LORRY BATCH MANIFEST -->
+            <div class="tracking-grid" id="lorry-manifest-grid" style="display:none; margin-top: 1.5rem;">
+                <div class="track-card">
+                    <h3><i class="fa-solid fa-boxes-stacked"></i> DELIVERY MANIFEST</h3>
+                    <div id="lorry-manifest-list" class="lorry-manifest-list"></div>
+                </div>
+                <div class="track-card">
+                    <h3><i class="fa-solid fa-road"></i> PATHWAY HISTORY</h3>
+                    <div id="lorry-history-list" class="lorry-history-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- OVERVIEW MODAL POP-UP (Admin Sales History) -->
+    <div id="order-detail-modal" class="modal-overlay">
+        <div class="notif-modal-content" style="max-width: 560px;">
+            <div class="notif-modal-header">
+                <h3 id="order-modal-title"><i class="fa-solid fa-receipt" style="color:var(--accent); margin-right:8px;"></i> OVERVIEW</h3>
+                <span class="close-notif-modal" onclick="closeOrderDetailModal()">&times;</span>
+            </div>
+            <div class="notif-modal-body" id="order-modal-body"></div>
+            <div class="notif-modal-footer">
+                <button type="button" class="btn-full" onclick="closeOrderDetailModal()" style="background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border);">CLOSE</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- NOTIFICATION DETAIL MODAL POP-UP -->
+    <div id="notif-modal-overlay" class="modal-overlay">
+        <div class="notif-modal-content">
+            <div class="notif-modal-header">
+                <h3 id="notif-modal-title"><i class="fa-solid fa-bell" style="color:var(--accent); margin-right:8px;"></i> NOTIFICATION DETAIL</h3>
+                <span class="close-notif-modal" onclick="closeNotificationDetail()">&times;</span>
+            </div>
+            <div class="notif-modal-body">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.8rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border);">
+                    <small id="notif-modal-date" style="color: var(--text-secondary); font-size: 0.8rem;"></small>
+                    <span id="notif-modal-badge" class="status-badge"></span>
+                </div>
+                <div id="notif-modal-message"></div>
+            </div>
+            <div class="notif-modal-footer">
+                <button type="button" class="btn-full" onclick="closeNotificationDetail()" style="background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border);">CLOSE</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- FIREBASE SDK & EDA WEBSOCKET SETUP -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
+        import { getDatabase, ref, set, onValue, get } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-database.js";
+        import { getAuth, RecaptchaVerifier, signInWithPhoneNumber } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
+
+        const firebaseConfig = {
+          apiKey: "AIzaSyClEdgWwQAsIoSjS06_C80NdejAw-e2kig",
+          authDomain: "void-logistics-shaan.firebaseapp.com",
+          databaseURL: "https://void-logistics-shaan-default-rtdb.asia-southeast1.firebasedatabase.app",
+          projectId: "void-logistics-shaan",
+          storageBucket: "void-logistics-shaan.firebasestorage.app",
+          messagingSenderId: "956865655329",
+          appId: "1:956865655329:web:07ba9ca251068ea9e92960",
+          measurementId: "G-8MJWY4DG8M"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+        const auth = getAuth(app); 
+
+        window.firebaseDb = db;
+        window.dbRef = ref;
+        window.dbSet = set;
+        window.dbOnValue = onValue;
+        window.dbGet = get;
+
+        window.firebaseAuth = auth;
+        window.RecaptchaVerifier = RecaptchaVerifier;
+        window.signInWithPhoneNumber = signInWithPhoneNumber;
+    </script>
+
+    <script src="firebase-store.js"></script>
+    <script src="admin.js"></script>
+</body>
+</html>
