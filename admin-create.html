@@ -31,6 +31,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
     import { getDatabase, ref, set, onValue, get } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-database.js";
+    import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, deleteUser } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyClEdgWwQAsIoSjS06_C80NdejAw-e2kig",
@@ -45,7 +46,22 @@
 
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
+    const auth = getAuth(app);
+
+    // Keep the current administrator signed in on the primary Auth instance.
+    // New administrator accounts are created on this secondary Auth instance.
+    const secondaryApp = initializeApp(firebaseConfig, 'void-admin-create-secondary');
+    const secondaryAuth = getAuth(secondaryApp);
+
     window.firebaseDb = db;
+    window.firebaseAuth = auth;
+    window.firebaseAdminCreateAuth = secondaryAuth;
+    window.createUserWithEmailAndPassword = createUserWithEmailAndPassword;
+    window.createUserWithEmailAndPasswordSecondary = createUserWithEmailAndPassword;
+    window.signInWithEmailAndPasswordSecondary = signInWithEmailAndPassword;
+    window.signOut = signOut;
+    window.signOutSecondaryAdminAuth = signOut;
+    window.deleteSecondaryUser = deleteUser;
     window.dbRef = ref;
     window.dbSet = set;
     window.dbOnValue = onValue;
