@@ -76,7 +76,10 @@
                 
                 <!-- Dashboard Tab -->
                 <div id="admin-dashboard" class="admin-tab active">
-                    <h2 class="section-title">SALES & SIGNUPS</h2>
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap;">
+                        <h2 class="section-title" style="margin-bottom:0.4rem;">SALES & SIGNUPS</h2>
+                        <small id="analytics-live-sync" style="color:var(--success); font-size:0.7rem; letter-spacing:0.04em;">LIVE FIREBASE SYNC • WAITING</small>
+                    </div>
                     <div class="stats-grid">
                         <div class="stat-card clickable-stat" onclick="jumpToSalesHistory('monthly')">
                             <h3>MONTHLY SALES</h3>
@@ -92,6 +95,26 @@
                             <h3>TOTAL USERS</h3>
                             <p id="stat-total-users">0</p>
                             <small style="color: #818cf8; font-size: 0.75rem;">View Database →</small>
+                        </div>
+                        <div class="stat-card clickable-stat" onclick="jumpToSalesHistory('all')">
+                            <h3>TOTAL ORDERS</h3>
+                            <p id="stat-total-orders">0</p>
+                            <small style="color: #818cf8; font-size: 0.75rem;">View History →</small>
+                        </div>
+                        <div class="stat-card clickable-stat" onclick="jumpToSalesHistory('pending')">
+                            <h3>PENDING ORDERS</h3>
+                            <p id="stat-pending-orders">0</p>
+                            <small style="color: #818cf8; font-size: 0.75rem;">Needs Dispatch →</small>
+                        </div>
+                        <div class="stat-card clickable-stat" onclick="jumpToSalesHistory('delivered')">
+                            <h3>DELIVERED ORDERS</h3>
+                            <p id="stat-delivered-orders">0</p>
+                            <small style="color: #818cf8; font-size: 0.75rem;">Fulfillment →</small>
+                        </div>
+                        <div class="stat-card clickable-stat" onclick="switchAdminTab('lorry-batches')">
+                            <h3>ACTIVE BATCHES</h3>
+                            <p id="stat-active-batches">0</p>
+                            <small style="color: #818cf8; font-size: 0.75rem;">Live Dispatch →</small>
                         </div>
                     </div>
                     
@@ -231,7 +254,10 @@
 
                 <!-- Hero Slides Tab -->
                 <div id="admin-slides" class="admin-tab">
-                    <h2 class="section-title">MANAGE HERO SLIDES & BRAND NEWS</h2>
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap;">
+                        <h2 class="section-title" style="margin-bottom:0.4rem;">MANAGE HERO SLIDES &amp; BRAND NEWS</h2>
+                        <small id="hero-sync-status" style="color:var(--text-secondary); font-size:0.7rem; letter-spacing:0.04em;">FIREBASE SYNC • WAITING</small>
+                    </div>
                     <div class="admin-add-product">
                         <h3>ADD NEW SLIDE / BANNER</h3>
                         <form onsubmit="adminAddSlide(event)" class="admin-form">
@@ -352,10 +378,10 @@
                 <!-- Lorry Batches Tab -->
                 <div id="admin-lorry-batches" class="admin-tab">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; flex-wrap: wrap; gap: 1rem;">
-                        <h2 class="section-title" style="margin: 0;">STANDARD DELIVERY — LORRY BATCHES</h2>
+                        <h2 class="section-title" style="margin: 0;">DISPATCH BATCHES — LORRY &amp; EXPRESS</h2>
                     </div>
                     <small style="color: var(--text-secondary); font-size: 0.8rem; display:block; margin-bottom: 1.5rem;">
-                        Orders placed with Standard Delivery are grouped by state and go out by van by default. A batch that grows past capacity automatically upgrades to a lorry. Dispatch a batch once it's ready.
+                        Standard Delivery orders are grouped by state into van/lorry batches. Instant Delivery orders are placed into express dispatch batches with a motorcycle or car. Use the live controls to dispatch, pause, resume, complete the next stop, or open the live map.
                     </small>
                     <div id="admin-lorry-batches-list" class="lorry-batches-admin-list"></div>
                 </div>
@@ -475,7 +501,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
         import { getDatabase, ref, set, onValue, get } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-database.js";
-        import { getAuth, RecaptchaVerifier, signInWithPhoneNumber } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
+        import { getAuth, onAuthStateChanged, RecaptchaVerifier, signInWithPhoneNumber, signInWithEmailAndPassword, createUserWithEmailAndPassword, EmailAuthProvider, reauthenticateWithCredential, signOut } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
 
         const firebaseConfig = {
           apiKey: "AIzaSyClEdgWwQAsIoSjS06_C80NdejAw-e2kig",
@@ -491,6 +517,7 @@
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
         const auth = getAuth(app); 
+        window.firebaseAuthReady = new Promise((resolve) => onAuthStateChanged(auth, resolve));
 
         window.firebaseDb = db;
         window.dbRef = ref;
@@ -501,6 +528,11 @@
         window.firebaseAuth = auth;
         window.RecaptchaVerifier = RecaptchaVerifier;
         window.signInWithPhoneNumber = signInWithPhoneNumber;
+        window.signInWithEmailAndPassword = signInWithEmailAndPassword;
+        window.createUserWithEmailAndPassword = createUserWithEmailAndPassword;
+        window.EmailAuthProvider = EmailAuthProvider;
+        window.reauthenticateWithCredential = reauthenticateWithCredential;
+        window.signOut = signOut;
     </script>
 
     <script src="firebase-store.js"></script>

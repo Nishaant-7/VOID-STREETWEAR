@@ -214,12 +214,12 @@
                     <input type="hidden" id="reg-verified" value="0">
                 </div>
 
-                <h3 style="font-family: var(--font-heading); font-size: 0.9rem; margin: 1rem 0 0.5rem 0; color: var(--accent);">PAYMENT / BANK INFO</h3>
-                <input type="text" id="reg-bank" placeholder="BANK ACCOUNT / CARD NUMBER" autocomplete="cc-number" required>
-                <div class="input-row">
-                    <input type="text" id="reg-expiry" placeholder="EXPIRY DATE (MM/YY)" autocomplete="cc-exp" required>
-                    <input type="text" id="reg-cvv" placeholder="CVV" autocomplete="cc-csc" required>
+
+                <div class="signup-agreement-row">
+                    <input type="checkbox" id="reg-agreement" name="agreement" required>
+                    <label for="reg-agreement">I agree to the VOID Terms of Use, Privacy Policy, and Firebase data-processing notice for account and delivery services.</label>
                 </div>
+                <div id="reg-agreement-status" class="signup-agreement-status" aria-live="polite"></div>
 
                 <div id="signup-recaptcha-container" class="recaptcha-wrap"></div>
                 <div id="firebase-recaptcha-container"></div>
@@ -260,10 +260,6 @@
             <div class="profile-field"><span>Street Address</span><span id="prof-disp-address">--</span></div>
             <div class="profile-field"><span>City & State</span><span id="prof-disp-citystate">--</span></div>
 
-            <div class="profile-section-title">PAYMENT & BANKING DETAILS (CONFIDENTIAL)</div>
-            <div class="profile-field"><span>Card / Bank No.</span><span id="prof-disp-bank" style="letter-spacing: 1px; color: #818cf8;">--</span></div>
-            <div class="profile-field"><span>Expiry Date</span><span id="prof-disp-expiry">--</span></div>
-            <div class="profile-field"><span>CVV</span><span id="prof-disp-cvv">--</span></div>
 
             <div style="margin-top: 2rem; display: flex; gap: 1rem; flex-wrap: wrap;">
                 <button type="button" class="btn-full" style="flex: 1 1 100%; background-color: #fff; color: #000;" onclick="goToMyOrders()"><i class="fa-solid fa-receipt"></i> VIEW PURCHASE HISTORY</button>
@@ -738,7 +734,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
     import { getDatabase, ref, set, onValue, get } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-database.js";
     // NEW: Import Firebase Authentication for Real SMS
-    import { getAuth, RecaptchaVerifier, signInWithPhoneNumber } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
+    import { getAuth, RecaptchaVerifier, signInWithPhoneNumber, signInWithEmailAndPassword, createUserWithEmailAndPassword, EmailAuthProvider, reauthenticateWithCredential, signOut } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyClEdgWwQAsIoSjS06_C80NdejAw-e2kig",
@@ -766,6 +762,11 @@
     window.firebaseAuth = auth;
     window.RecaptchaVerifier = RecaptchaVerifier;
     window.signInWithPhoneNumber = signInWithPhoneNumber;
+    window.signInWithEmailAndPassword = signInWithEmailAndPassword;
+    window.createUserWithEmailAndPassword = createUserWithEmailAndPassword;
+    window.EmailAuthProvider = EmailAuthProvider;
+    window.reauthenticateWithCredential = reauthenticateWithCredential;
+    window.signOut = signOut;
 </script>
     <script src="firebase-store.js"></script>
     <script src="index.js"></script>

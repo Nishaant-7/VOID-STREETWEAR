@@ -411,31 +411,56 @@ function checkAndAutoCompleteDeliveries() {
   }
 }
 
-function findOrCreateLorryBatch(state) {
-  let batch = lorryBatches.find((b) => b.state === state && b.status === 'Forming');
-  if (batch) return batch;
+function findOrCreateLorryBatch(state, options = {}) {
+  const deliveryMethod = options.deliveryMethod || 'standard';
+  const isInstant = deliveryMethod === 'instant';
+  const existing = lorryBatches.find((b) =>
+    b.state === state &&
+    b.status === 'Forming' &&
+    (b.deliveryMethod || 'standard') === deliveryMethod
+  );
+  if (existing) return existing;
 
-  const seed = state + '-' + Date.now();
+  const seed = `${state}-${deliveryMethod}-${Date.now()}`;
   const rand = seededRandom(seed);
-  const vehicle = STANDARD_VAN_FLEET[Math.floor(rand() * STANDARD_VAN_FLEET.length)];
+  const standardVehicle = STANDARD_VAN_FLEET[Math.floor(rand() * STANDARD_VAN_FLEET.length)];
+  const instantVehicle = options.vehicle || {
+    type: 'Instant Dispatch Motorcycle',
+    category: 'motorcycle',
+    icon: 'fa-motorcycle',
+    consumptionLperKm: 0.025,
+    tankCapacityL: 4.2
+  };
+  const vehicle = isInstant ? instantVehicle : standardVehicle;
 
-  batch = {
-    batchId: 'LOT-2026-' + Math.floor(1000 + Math.random() * 9000),
+  const batch = {
+    batchId: isInstant
+      ? 'EXP-2026-' + Math.floor(1000 + Math.random() * 9000)
+      : 'LOT-2026-' + Math.floor(1000 + Math.random() * 9000),
+    createdByUid: window.VoidFirebaseStore?.currentAuthUser()?.uid || null,
     state: state,
-    status: 'Forming', 
+    deliveryMethod,
+    batchType: isInstant ? 'express' : 'standard',
+    status: 'Forming',
     vehicleType: vehicle.type,
-    vehicleCategory: 'van',
-    vehicleIcon: vehicle.icon,
+    vehicleCategory: vehicle.category || (isInstant ? 'motorcycle' : 'van'),
+    vehicleIcon: vehicle.icon || (isInstant ? 'fa-motorcycle' : 'fa-truck'),
     consumptionRate: vehicle.consumptionLperKm,
     tankCapacity: vehicle.tankCapacityL,
-    plateNo: 'VVN ' + Math.floor(1000 + Math.random() * 9000),
-    courier: LORRY_COURIERS[Math.floor(Math.random() * LORRY_COURIERS.length)],
+    plateNo: isInstant
+      ? 'EXP ' + Math.floor(1000 + Math.random() * 9000)
+      : 'VVN ' + Math.floor(1000 + Math.random() * 9000),
+    courier: isInstant ? 'Aiman Zikri' : LORRY_COURIERS[Math.floor(Math.random() * LORRY_COURIERS.length)],
     createdAt: Date.now(),
     dispatchTime: null,
-    totalItems: 0,      
-    legDurations: [],   
-    stops: [],          
-    history: [],        
+    totalItems: 0,
+    legDurations: [],
+    stops: [],
+    history: [{
+      time: Date.now(),
+      type: 'batch_created',
+      text: `${isInstant ? 'Instant' : 'Standard'} delivery batch created for ${state}.`
+    }]
   };
   lorryBatches.push(batch);
   return batch;
@@ -462,9 +487,14 @@ function upgradeBatchToLorry(batch) {
 }
 
 function assignOrderToLorryBatch(order) {
-  const batch = findOrCreateLorryBatch(order.state);
+  const isInstant = order.deliveryMethod === 'instant';
+  const batch = findOrCreateLorryBatch(order.state, {
+    deliveryMethod: isInstant ? 'instant' : 'standard',
+    vehicle: isInstant ? order.dispatchVehicle : null
+  });
   batch.stops.push({
     orderId: order.orderId,
+    deliveryMethod: order.deliveryMethod || 'standard',
     trackingNo: null,
     customerEmail: order.customerEmail,
     customerName: order.customerName,
@@ -478,7 +508,7 @@ function assignOrderToLorryBatch(order) {
   });
   batch.totalItems = (batch.totalItems || 0) + (order.qty || 0);
 
-  if (batch.stops.length > STANDARD_VAN_MAX_STOPS || batch.totalItems > STANDARD_VAN_MAX_ITEMS) {
+  if (!isInstant && (batch.stops.length > STANDARD_VAN_MAX_STOPS || batch.totalItems > STANDARD_VAN_MAX_ITEMS)) {
     upgradeBatchToLorry(batch);
   }
 
@@ -1148,7 +1178,12 @@ function handleSlideButtonClick(index) {
 function renderHeroSlider() {
   const container = document.getElementById('slides-container');
   const dotsContainer = document.getElementById('slider-dots');
-  if (!container) return;
+  if (!container || !dotsContainer) return;
+
+  heroSlides = (Array.isArray(heroSlides) ? heroSlides : [])
+    .filter((slide) => slide && slide.image)
+    .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+  currentSlide = heroSlides.length > 0 ? Math.min(currentSlide, heroSlides.length - 1) : 0;
 
   container.innerHTML = '';
   dotsContainer.innerHTML = '';
@@ -1168,7 +1203,12 @@ function renderHeroSlider() {
     dotsContainer.innerHTML += `<div class="dot ${index === 0 ? 'active' : ''}" onclick="goToSlide(${index})"></div>`;
   });
 
-  startSlideInterval();
+  updateSlider();
+  if (heroSlides.length > 1) {
+    startSlideInterval();
+  } else {
+    clearInterval(slideInterval);
+  }
 }
 
 function updateSlider() {
@@ -2457,6 +2497,7 @@ async function processPayment(e) {
     orderId: 'ORD-' + Math.floor(1000 + Math.random() * 9000),
     customerName: chkName,
     customerEmail: currentUser ? currentUser.email : '',
+    customerUid: currentUser?.uid || window.VoidFirebaseStore?.currentAuthUser()?.uid || null,
     trackingNo: null, 
     address: `${chkAddress}, ${chkZip} ${chkCity}, ${chkState}`,
     state: chkState,
@@ -2534,23 +2575,27 @@ async function processPayment(e) {
     newOrder.vehicleType = selectedVehicle.type;
     newOrder.vehicleCategory = selectedVehicle.category;
     newOrder.vehicleIcon = selectedVehicle.icon;
+    newOrder.dispatchVehicle = selectedVehicle;
     newOrder.consumptionRate = selectedVehicle.consumptionLperKm;
     newOrder.tankCapacity = selectedVehicle.tankCapacityL;
     newOrder.plateNo = 'VAB ' + Math.floor(1000 + Math.random() * 9000);
 
     salesHistoryData.unshift(newOrder);
+    const batch = assignOrderToLorryBatch(newOrder);
     saveSalesHistory();
 
-    confirmationMsg = `Payment successful! Your order has been placed with status: Pending. ${shippingFeeNote}`;
+    const batchFillText = `${batch.stops.length} order(s) / ${batch.totalItems} item(s)`;
+    confirmationMsg = `Payment successful! Your Instant Delivery order has been added to express dispatch batch ${batch.batchId} for ${chkState} (${batchFillText}). An admin must dispatch the batch from Admin → Lorry Batches. ${shippingFeeNote}`;
 
     if (currentUser) {
       addNotification(
         currentUser.email,
-        'Order Placed (Pending)',
-        `Order ${newOrder.orderId} placed successfully. ${shippingFeeNote} Awaiting admin dispatch and status update to "Out for Delivery".`,
+        'Order Placed (Instant Dispatch)',
+        `Order ${newOrder.orderId} was added to express dispatch batch ${batch.batchId} for ${chkState}. Awaiting admin dispatch. ${shippingFeeNote}`,
         null,
         {
           orderId: newOrder.orderId,
+          batchId: batch.batchId,
           amount: totalAmount,
           status: 'Pending',
           items: orderItemsText
@@ -2581,35 +2626,52 @@ async function handleLogin(e) {
 
   const email = document.getElementById('login-email').value.trim().toLowerCase();
   const rawPass = document.getElementById('login-pass').value;
-  const hashedPass = await hashPassword(rawPass);
-  const users = await loadUsersFromFirebase();
-  const found = Array.isArray(users)
-    ? users.find((u) => (u.email || '').toLowerCase() === email && u.pass === hashedPass)
-    : null;
 
-  if (found && found.role === 'admin') {
-    alert('Admin accounts must use the secure admin login page.');
-    window.location.href = 'admin-login.html';
-    return;
-  }
+  try {
+    if (!window.firebaseAuth || typeof window.signInWithEmailAndPassword !== 'function') {
+      throw new Error('Firebase Email/Password Authentication is not available.');
+    }
 
-  if (found && found.blocked) {
-    alert('This account has been blocked by an admin. Please contact support.');
-    if (typeof grecaptcha !== 'undefined' && loginRecaptchaId !== null) grecaptcha.reset(loginRecaptchaId);
-    return;
-  }
+    const credential = await window.signInWithEmailAndPassword(
+      window.firebaseAuth,
+      email,
+      rawPass
+    );
 
-  if (found) {
-    currentUser = found;
+    const authUser = credential.user;
+    const users = await loadUsersFromFirebase();
+    const found = users.find((user) => user.uid === authUser.uid);
+
+    if (!found) {
+      throw new Error('Your Firebase account has no VOID profile record yet.');
+    }
+
+    if (found.role === 'admin') {
+      await window.signOut(window.firebaseAuth);
+      alert('Admin accounts must use the secure admin login page.');
+      window.location.replace('admin-login.html');
+      return;
+    }
+
+    if (found.blocked) {
+      await window.signOut(window.firebaseAuth);
+      alert('This account has been blocked by an admin. Please contact support.');
+      return;
+    }
+
+    currentUser = { ...found, uid: authUser.uid };
     setSessionUser(currentUser);
     addNotification(currentUser.email, 'Account Login', 'You logged into your account successfully.');
     checkLoginState();
     navigateTo('home');
-  } else {
-    alert('Invalid email or password.');
+  } catch (error) {
+    console.error('Firebase customer login failed:', error);
+    alert('Invalid email or password, or this Firebase account has not been registered yet.');
+  } finally {
+    if (typeof grecaptcha !== 'undefined' && loginRecaptchaId !== null) {
+      grecaptcha.reset(loginRecaptchaId);
+    }
   }
-
-  if (typeof grecaptcha !== 'undefined' && loginRecaptchaId !== null) grecaptcha.reset(loginRecaptchaId);
 }
 
 const OTP_EXPIRY_MS = 5 * 60 * 1000;      
@@ -2903,15 +2965,19 @@ async function handleSignup(e) {
     const username = document.getElementById('reg-username').value;
     const email = document.getElementById('reg-email').value;
     const rawPass = document.getElementById('reg-pass').value;
-    const pass = await hashPassword(rawPass);
     const phone = document.getElementById('reg-phone').value;
     const address = document.getElementById('reg-address').value;
     const city = document.getElementById('reg-city').value;
     const state = document.getElementById('reg-state').value;
     const zip = document.getElementById('reg-zip') ? document.getElementById('reg-zip').value : '40470';
-    const bank = document.getElementById('reg-bank').value;
-    const expiry = document.getElementById('reg-expiry').value;
-    const cvv = document.getElementById('reg-cvv').value;
+    const agreementCheckbox = document.getElementById('reg-agreement');
+
+    if (!agreementCheckbox || !agreementCheckbox.checked) {
+      alert('Please tick the agreement checkbox to accept the VOID Terms, Privacy Policy, and Firebase data-processing notice before creating your account.');
+      agreementCheckbox?.focus();
+      if (typeof grecaptcha !== 'undefined' && signupRecaptchaId !== null) grecaptcha.reset(signupRecaptchaId);
+      return;
+    }
 
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
     if (!passwordRegex.test(rawPass)) {
@@ -2951,12 +3017,31 @@ async function handleSignup(e) {
     const geo = await resolveDeliveryCoords('reg', address, city, state, zip);
     if (!geo) return; 
 
-    let newUser = { 
-      name, username, email, pass, phone, address, city, state, zip, bank, expiry, cvv,
+    let authUser = window.firebaseAuth && window.firebaseAuth.currentUser;
+    const activeEmail = authUser?.email?.toLowerCase() || '';
+    if (authUser && activeEmail !== email.toLowerCase()) {
+      if (typeof window.signOut === 'function') await window.signOut(window.firebaseAuth);
+      authUser = null;
+    }
+    if (!authUser && typeof window.createUserWithEmailAndPassword === 'function') {
+      const credential = await window.createUserWithEmailAndPassword(window.firebaseAuth, email, rawPass);
+      authUser = credential.user;
+    }
+
+    if (!authUser) {
+      throw new Error('Firebase Authentication is required before creating a customer account.');
+    }
+
+    let newUser = {
+      uid: authUser.uid,
+      name, username, email, phone, address, city, state, zip,
       lat: geo.lat,
       lng: geo.lng,
       emailVerified: true,
       phoneVerified: true,
+      agreementAccepted: true,
+      agreementAcceptedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
       role: 'customer'
     };
 
@@ -3012,9 +3097,20 @@ function closePasswordVerifyModal() {
 async function verifyPasswordAndOpenUpdate(e) {
   e.preventDefault();
   const passInput = document.getElementById('verify-pass-input').value;
-  const hashedPass = await hashPassword(passInput);
+  const authUser = window.firebaseAuth && window.firebaseAuth.currentUser;
 
-  if (hashedPass !== currentUser.pass) {
+  try {
+    if (!authUser || typeof window.EmailAuthProvider !== 'function' || typeof window.reauthenticateWithCredential !== 'function') {
+      throw new Error('Firebase Auth reauthentication is unavailable.');
+    }
+
+    const credential = window.EmailAuthProvider.credential(
+      authUser.email,
+      passInput
+    );
+    await window.reauthenticateWithCredential(authUser, credential);
+  } catch (error) {
+    console.error('Profile reauthentication failed:', error);
     alert('Incorrect password. Access denied.');
     return;
   }
@@ -3313,11 +3409,6 @@ function populateProfileView() {
   document.getElementById('prof-disp-address').innerText = currentUser.address || '--';
   document.getElementById('prof-disp-citystate').innerText = `${currentUser.zip || ''} ${currentUser.city || ''}, ${currentUser.state || ''}`;
 
-  let rawBank = currentUser.bank ||  '4242424242424242';
- let maskedBank = '•••• •••• •••• ' + rawBank.slice(-4);
-  document.getElementById('prof-disp-bank').innerText = maskedBank;
-  document.getElementById('prof-disp-expiry').innerText = currentUser.expiry || '12/28';
-  document.getElementById('prof-disp-cvv').innerText = '•••';
 }
 
 function logout() {
@@ -3326,8 +3417,9 @@ function logout() {
   }
   currentUser = null;
   setSessionUser(null);
-  
-  // THE FIX: Hard redirect forces the admin out of the dashboard back to storefront
+  if (window.firebaseAuth && typeof window.signOut === 'function') {
+    window.signOut(window.firebaseAuth).catch((error) => console.warn('Firebase sign-out failed:', error));
+  }
   window.location.href = 'index.html'; 
 }
 
@@ -4755,32 +4847,25 @@ function bootFirebase() {
       products = firebaseToArray(value).map(normalizeProductImage);
       renderProducts(products);
     } else {
-      saveProductsToCloud();
+      products = DEFAULT_PRODUCTS.map(normalizeProductImage);
+      renderProducts(products);
     }
   });
 
   window.VoidFirebaseStore.subscribe('sales_history', (value) => {
-    if (value) {
-      salesHistoryData = firebaseToArray(value);
-      if (document.getElementById('my-orders-list')) renderMyOrders();
-    } else {
-      saveSalesHistory();
-    }
+    salesHistoryData = value ? firebaseToArray(value) : [];
+    if (document.getElementById('my-orders-list')) renderMyOrders();
   });
 
   window.VoidFirebaseStore.subscribe('lorry_batches', (value) => {
-    if (value) {
-      lorryBatches = firebaseToArray(value);
-      refreshOpenLorryTrackingFromFirebase();
-      if (currentTrackingOrder && currentTrackingOrder.batchId && typeof renderLorryManifestPanel === 'function') renderLorryManifestPanel(currentTrackingOrder);
-    } else {
-      saveLorryBatches();
-    }
+    lorryBatches = value ? firebaseToArray(value) : [];
+    refreshOpenLorryTrackingFromFirebase();
+    if (currentTrackingOrder && currentTrackingOrder.batchId && typeof renderLorryManifestPanel === 'function') renderLorryManifestPanel(currentTrackingOrder);
   });
 
   window.VoidFirebaseStore.subscribe('users', (value) => {
-    registeredUsers = firebaseToArray(value);
-    const cloudUser = currentUser && registeredUsers.find((u) => (u.email || '').toLowerCase() === (currentUser.email || '').toLowerCase());
+    registeredUsers = value ? firebaseToArray(value) : [];
+    const cloudUser = currentUser && registeredUsers.find((u) => u.uid === currentUser.uid);
     if (cloudUser) {
       currentUser = cloudUser;
       setSessionUser(currentUser);
@@ -4789,22 +4874,31 @@ function bootFirebase() {
   });
 
   window.VoidFirebaseStore.subscribe('notifications', (value) => {
-    notifications = firebaseToArray(value);
+    notifications = value ? firebaseToArray(value) : [];
     renderNotifications();
   });
 
   window.VoidFirebaseStore.subscribe('hero_slides', (value) => {
-    if (value) {
-      heroSlides = firebaseToArray(value);
-      renderHeroSlider();
-    } else {
-      saveSlidesToCloud();
-    }
+    heroSlides = value
+      ? firebaseToArray(value).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+      : [...DEFAULT_HERO_SLIDES];
+    renderHeroSlider();
   });
 }
 
 function setupIndexEventListeners() {
   ['reg', 'chk', 'edit'].forEach(setupAddressAutocompleteInputs);
+
+  const agreementCheckbox = document.getElementById('reg-agreement');
+  const agreementStatus = document.getElementById('reg-agreement-status');
+  if (agreementCheckbox && agreementStatus) {
+    const updateAgreementStatus = () => {
+      agreementStatus.innerText = agreementCheckbox.checked ? '✓ AGREEMENT ACCEPTED' : 'Agreement is required before account creation.';
+      agreementStatus.style.color = agreementCheckbox.checked ? 'var(--success)' : 'var(--danger)';
+    };
+    agreementCheckbox.addEventListener('change', updateAgreementStatus);
+    updateAgreementStatus();
+  }
   attachVerifyResetListener('reg', 'email');
   attachVerifyResetListener('reg', 'phone');
   attachVerifyResetListener('edit', 'email');

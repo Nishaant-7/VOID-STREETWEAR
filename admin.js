@@ -146,6 +146,8 @@ const LORRY_FLEET = [
 const LORRY_COURIERS = ['Razif Hakim', 'Chong Wei Jian', 'Suhaimi Bakar', 'Ravindran Muthu'];
 
 let lorryBatches = [];
+let adminSalesLoaded = false;
+let adminBatchesLoaded = false;
 
 function saveLorryBatches() {
   return writeFirebase('lorry_batches', lorryBatches)
@@ -334,9 +336,52 @@ function saveProductsToCloud() {
     .catch((error) => console.error('Cloud Sync Error (Products):', error));
 }
 
-function saveSlidesToCloud() {
-  return writeFirebase('hero_slides', heroSlides)
-    .catch((error) => console.error('Cloud Sync Error (Slides):', error));
+function setAdminSyncStatus(message, isSuccess = false) {
+  const statusEl = document.getElementById('hero-sync-status');
+  if (!statusEl) return;
+  statusEl.innerText = message;
+  statusEl.style.color = isSuccess ? 'var(--success)' : 'var(--text-secondary)';
+}
+
+async function waitForAdminFirebaseAuth(timeoutMs = 8000) {
+  const authReady = typeof window.VoidFirebaseStore?.waitForAuth === 'function'
+    ? await window.VoidFirebaseStore.waitForAuth(timeoutMs)
+    : !!window.VoidFirebaseStore?.currentAuthUser();
+  return !!(authReady && window.VoidFirebaseStore?.currentAuthUser() && getAdminSession()?.role === 'admin');
+}
+
+function normalizeHeroSlides(slides) {
+  return (Array.isArray(slides) ? slides : []).map((slide, index) => ({
+    ...(slide || {}),
+    slideId: slide?.slideId || `slide_${index + 1}`,
+    sortOrder: index
+  }));
+}
+
+async function saveSlidesToCloud(options = {}) {
+  const authReady = await waitForAdminFirebaseAuth();
+  if (!authReady) {
+    setAdminSyncStatus('Firebase admin session is still restoring. Sign in again if synchronization does not recover.', false);
+    return null;
+  }
+
+  heroSlides = normalizeHeroSlides(heroSlides);
+  setAdminSyncStatus('SYNCING HERO SLIDES WITH FIREBASE…', false);
+
+  try {
+    const savedSlides = await writeFirebase('hero_slides', heroSlides);
+    heroSlides = normalizeHeroSlides(savedSlides || heroSlides);
+    renderAdminSlides();
+    setAdminSyncStatus(`FIREBASE SYNCED • ${new Date().toLocaleTimeString('en-MY')}`, true);
+    return savedSlides || heroSlides;
+  } catch (error) {
+    console.error('Cloud Sync Error (Slides):', error);
+    setAdminSyncStatus('Firebase sync failed. Check the admin Firebase Auth session and Rules.', false);
+    if (!options.silent) {
+      alert(`Hero Slides could not be synchronized with Firebase: ${error.message}`);
+    }
+    return null;
+  }
 }
 
 function saveUsersToCloud(usersArray) {
@@ -401,31 +446,56 @@ function checkAndAutoCompleteDeliveries() {
   }
 }
 
-function findOrCreateLorryBatch(state) {
-  let batch = lorryBatches.find((b) => b.state === state && b.status === 'Forming');
-  if (batch) return batch;
+function findOrCreateLorryBatch(state, options = {}) {
+  const deliveryMethod = options.deliveryMethod || 'standard';
+  const isInstant = deliveryMethod === 'instant';
+  const existing = lorryBatches.find((b) =>
+    b.state === state &&
+    b.status === 'Forming' &&
+    (b.deliveryMethod || 'standard') === deliveryMethod
+  );
+  if (existing) return existing;
 
-  const seed = state + '-' + Date.now();
+  const seed = `${state}-${deliveryMethod}-${Date.now()}`;
   const rand = seededRandom(seed);
-  const vehicle = STANDARD_VAN_FLEET[Math.floor(rand() * STANDARD_VAN_FLEET.length)];
+  const standardVehicle = STANDARD_VAN_FLEET[Math.floor(rand() * STANDARD_VAN_FLEET.length)];
+  const instantVehicle = options.vehicle || {
+    type: 'Instant Dispatch Motorcycle',
+    category: 'motorcycle',
+    icon: 'fa-motorcycle',
+    consumptionLperKm: 0.025,
+    tankCapacityL: 4.2
+  };
+  const vehicle = isInstant ? instantVehicle : standardVehicle;
 
-  batch = {
-    batchId: 'LOT-2026-' + Math.floor(1000 + Math.random() * 9000),
+  const batch = {
+    batchId: isInstant
+      ? 'EXP-2026-' + Math.floor(1000 + Math.random() * 9000)
+      : 'LOT-2026-' + Math.floor(1000 + Math.random() * 9000),
+    createdByUid: window.VoidFirebaseStore?.currentAuthUser()?.uid || null,
     state: state,
-    status: 'Forming', 
+    deliveryMethod,
+    batchType: isInstant ? 'express' : 'standard',
+    status: 'Forming',
     vehicleType: vehicle.type,
-    vehicleCategory: 'van',
-    vehicleIcon: vehicle.icon,
+    vehicleCategory: vehicle.category || (isInstant ? 'motorcycle' : 'van'),
+    vehicleIcon: vehicle.icon || (isInstant ? 'fa-motorcycle' : 'fa-truck'),
     consumptionRate: vehicle.consumptionLperKm,
     tankCapacity: vehicle.tankCapacityL,
-    plateNo: 'VVN ' + Math.floor(1000 + Math.random() * 9000),
-    courier: LORRY_COURIERS[Math.floor(Math.random() * LORRY_COURIERS.length)],
+    plateNo: isInstant
+      ? 'EXP ' + Math.floor(1000 + Math.random() * 9000)
+      : 'VVN ' + Math.floor(1000 + Math.random() * 9000),
+    courier: isInstant ? 'Aiman Zikri' : LORRY_COURIERS[Math.floor(Math.random() * LORRY_COURIERS.length)],
     createdAt: Date.now(),
     dispatchTime: null,
-    totalItems: 0,      
-    legDurations: [],   
-    stops: [],          
-    history: [],        
+    totalItems: 0,
+    legDurations: [],
+    stops: [],
+    history: [{
+      time: Date.now(),
+      type: 'batch_created',
+      text: `${isInstant ? 'Instant' : 'Standard'} delivery batch created for ${state}.`
+    }]
   };
   lorryBatches.push(batch);
   return batch;
@@ -452,9 +522,14 @@ function upgradeBatchToLorry(batch) {
 }
 
 function assignOrderToLorryBatch(order) {
-  const batch = findOrCreateLorryBatch(order.state);
+  const isInstant = order.deliveryMethod === 'instant';
+  const batch = findOrCreateLorryBatch(order.state, {
+    deliveryMethod: isInstant ? 'instant' : 'standard',
+    vehicle: isInstant ? order.dispatchVehicle : null
+  });
   batch.stops.push({
     orderId: order.orderId,
+    deliveryMethod: order.deliveryMethod || 'standard',
     trackingNo: null,
     customerEmail: order.customerEmail,
     customerName: order.customerName,
@@ -468,7 +543,7 @@ function assignOrderToLorryBatch(order) {
   });
   batch.totalItems = (batch.totalItems || 0) + (order.qty || 0);
 
-  if (batch.stops.length > STANDARD_VAN_MAX_STOPS || batch.totalItems > STANDARD_VAN_MAX_ITEMS) {
+  if (!isInstant && (batch.stops.length > STANDARD_VAN_MAX_STOPS || batch.totalItems > STANDARD_VAN_MAX_ITEMS)) {
     upgradeBatchToLorry(batch);
   }
 
@@ -499,7 +574,17 @@ function computeNearestNeighborOrder(stops) {
   return ordered;
 }
 
-function dispatchLorryBatch(batchId) {
+function getDispatchVehicleLabel(batch) {
+  if (!batch) return 'delivery vehicle';
+  if ((batch.deliveryMethod || 'standard') === 'instant' || batch.batchType === 'express') {
+    return `Express ${batch.vehicleType || 'Vehicle'}`;
+  }
+  return batch.vehicleCategory === 'lorry'
+    ? `Lorry ${batch.plateNo || ''}`.trim()
+    : `Van ${batch.plateNo || ''}`.trim();
+}
+
+function dispatchLorryBatch(batchId, options = {}) {
   const batch = lorryBatches.find((item) => item.batchId === batchId);
   if (!batch || batch.status !== 'Forming') return;
   if (!Array.isArray(batch.stops) || batch.stops.length === 0) {
@@ -517,7 +602,7 @@ function dispatchLorryBatch(batchId) {
 
   const rand = seededRandom(batch.batchId + '-legs');
   batch.legDurations = batch.stops.map(() => Math.floor(LORRY_LEG_MIN_SEC + rand() * (LORRY_LEG_MAX_SEC - LORRY_LEG_MIN_SEC)));
-  const vehicleLabel = batch.vehicleCategory === 'van' ? 'Van' : 'Lorry';
+  const vehicleLabel = getDispatchVehicleLabel(batch);
   const now = Date.now();
 
   batch.status = 'Out for Delivery';
@@ -567,7 +652,9 @@ function dispatchLorryBatch(batchId) {
   saveSalesHistory();
   if (typeof renderAdminLorryBatches === 'function') renderAdminLorryBatches();
   syncOrderStatusViews();
-  alert(`${vehicleLabel} ${batch.plateNo} dispatched with ${batch.stops.length} parcel(s) to ${batch.state}.`);
+  if (!options.silent) {
+    alert(`${vehicleLabel} ${batch.plateNo} dispatched with ${batch.stops.length} parcel(s) to ${batch.state}.`);
+  }
 }
 
 function pauseLorryBatch(batchId) {
@@ -1198,6 +1285,9 @@ function logout() {
   }
   currentUser = null;
   setSessionUser(null);
+  if (window.firebaseAuth && typeof window.signOut === 'function') {
+    window.signOut(window.firebaseAuth).catch((error) => console.warn('Firebase admin sign-out failed:', error));
+  }
   window.location.href = 'admin-login.html';
 }
 function switchAdminTab(tabId) {
@@ -1444,7 +1534,7 @@ function populateSlideProductDropdown() {
   });
 }
 
-function adminAddSlide(e) {
+async function adminAddSlide(e) {
   e.preventDefault();
   const title = document.getElementById('slide-title').value;
   const subtitle = document.getElementById('slide-subtitle').value;
@@ -1459,8 +1549,23 @@ function adminAddSlide(e) {
   const linkType = document.getElementById('slide-link-type').value;
   const targetItemId = linkType === 'item' ? parseInt(document.getElementById('slide-item-select').value) : null;
 
-  heroSlides.push({ title, subtitle, image, btnText, linkType, targetItemId });
-  if (typeof saveSlidesToCloud === 'function') saveSlidesToCloud();
+  const newSlideId = `slide_${Date.now()}`;
+  heroSlides.push({
+    slideId: newSlideId,
+    title,
+    subtitle,
+    image,
+    btnText,
+    linkType,
+    targetItemId,
+    sortOrder: heroSlides.length
+  });
+  const savedSlides = typeof saveSlidesToCloud === 'function' ? await saveSlidesToCloud() : null;
+  if (!savedSlides) {
+    heroSlides = heroSlides.filter((slide) => slide.slideId !== newSlideId);
+    renderAdminSlides();
+    return;
+  }
 
   if (currentUser) {
     addNotification(currentUser.email, 'Admin Action', `Added hero slide "${title}".`);
@@ -1468,7 +1573,7 @@ function adminAddSlide(e) {
 
   renderAdminSlides();
   renderHeroSlider();
-  alert('Hero slide added successfully!');
+  alert('Hero slide added successfully and synchronized with Firebase!');
   e.target.reset();
   resetImageUpload('slide');
 }
@@ -1492,13 +1597,23 @@ function renderAdminSlides() {
   });
 }
 
-function deleteSlide(idx) {
+async function deleteSlide(idx) {
   const removed = heroSlides[idx];
+  if (!removed) return;
   heroSlides.splice(idx, 1);
+  heroSlides = normalizeHeroSlides(heroSlides);
 
-  if (typeof saveSlidesToCloud === 'function') saveSlidesToCloud();
+  const savedSlides = typeof saveSlidesToCloud === 'function'
+    ? await saveSlidesToCloud({ silent: true })
+    : heroSlides;
+  if (!savedSlides) {
+    heroSlides.splice(idx, 0, removed);
+    heroSlides = normalizeHeroSlides(heroSlides);
+    renderAdminSlides();
+    return;
+  }
 
-  if (currentUser && removed) {
+  if (currentUser) {
     addNotification(currentUser.email, 'Admin Action', `Deleted slide "${removed.title}".`);
   }
 
@@ -1582,8 +1697,8 @@ function renderAdminSalesHistory() {
       : `<span style="color: var(--text-secondary); font-style: italic;">Pending Generation</span>`;
 
     let deliveryDisplay = order.batchId
-      ? `<span style="color: var(--text-secondary); font-size: 0.75rem;"><i class="fa-solid fa-truck"></i> Standard<br><span style="cursor:pointer; color: var(--accent);" onclick="switchAdminTab('lorry-batches')">${order.batchId}</span></span>`
-      : `<span style="color: var(--text-secondary); font-size: 0.75rem;"><i class="fa-solid fa-bolt"></i> Instant</span>`;
+      ? `<span style="color: var(--text-secondary); font-size: 0.75rem;"><i class="fa-solid ${order.deliveryMethod === 'instant' ? 'fa-bolt' : 'fa-truck'}"></i> ${order.deliveryMethod === 'instant' ? 'Instant Express' : 'Standard'}<br><span style="cursor:pointer; color: var(--accent);" onclick="switchAdminTab('lorry-batches')">${order.batchId}</span></span>`
+      : `<span style="color: var(--text-secondary); font-size: 0.75rem;"><i class="fa-solid fa-bolt"></i> Instant — awaiting batch repair</span>`;
 
     let statusActionCell = order.batchId
       ? `<span style="color: ${statusColor}; font-weight: bold; display: block; margin-bottom: 4px;">${order.status}</span>
@@ -1636,8 +1751,8 @@ function openOrderDetailModal(orderId) {
     : `<span style="color: var(--text-secondary); font-style: italic;">Pending Generation</span>`;
 
   const deliveryLabel = order.batchId
-    ? `Standard (Batch ${order.batchId})`
-    : (order.deliveryMethod === 'standard' ? 'Standard' : 'Instant');
+    ? `${order.deliveryMethod === 'instant' ? 'Instant Express' : 'Standard'} (Batch ${order.batchId})`
+    : (order.deliveryMethod === 'standard' ? 'Standard' : 'Instant — awaiting batch repair');
 
   const lines = (order.itemsDetail && order.itemsDetail.length > 0)
     ? order.itemsDetail
@@ -1708,17 +1823,51 @@ function updateStatusFromOrderModal(orderId) {
   }
 }
 
+function ensureOpenOrdersHaveDispatchBatches() {
+  if (!adminSalesLoaded || !adminBatchesLoaded) return false;
+  if (!Array.isArray(salesHistoryData) || !Array.isArray(lorryBatches)) return false;
+
+  let changed = false;
+  const ordersToDispatch = [];
+
+  salesHistoryData.forEach((order) => {
+    if (!order || !['instant', 'standard'].includes(order.deliveryMethod)) return;
+    if (!['Pending', 'Out for Delivery'].includes(order.status)) return;
+
+    const alreadyAttached = lorryBatches.some((batch) =>
+      Array.isArray(batch.stops) && batch.stops.some((stop) => stop.orderId === order.orderId)
+    );
+    if (alreadyAttached) return;
+
+    const batch = assignOrderToLorryBatch(order);
+    changed = true;
+    if (order.status === 'Out for Delivery') ordersToDispatch.push(batch.batchId);
+  });
+
+  ordersToDispatch.forEach((batchId) => {
+    const batch = lorryBatches.find((item) => item.batchId === batchId);
+    if (batch && batch.status === 'Forming') dispatchLorryBatch(batchId, { silent: true });
+  });
+
+  if (changed) {
+    saveLorryBatches();
+    saveSalesHistory();
+    renderAdminSalesHistory();
+  }
+  return changed;
+}
+
 function renderAdminLorryBatches() {
   const container = document.getElementById('admin-lorry-batches-list');
   if (!container) return;
 
   if (lorryBatches.length === 0) {
-    container.innerHTML = `<div class="lorry-batch-empty-note">No standard delivery batches yet. They're created automatically the moment a customer checks out with Standard Delivery.</div>`;
+    container.innerHTML = `<div class="lorry-batch-empty-note">No dispatch batches yet. Standard orders create state-based van/lorry batches, while Instant orders create express dispatch batches automatically.</div>`;
     return;
   }
 
   const sorted = lorryBatches.slice().sort((a, b) => {
-    const rank = { 'Forming': 0, 'Out for Delivery': 1, 'Delivered': 2 };
+    const rank = { 'Forming': 0, 'Out for Delivery': 1, 'Paused': 2, 'Delivered': 3 };
     if (rank[a.status] !== rank[b.status]) return rank[a.status] - rank[b.status];
     return (b.dispatchTime || b.createdAt) - (a.dispatchTime || a.createdAt);
   });
@@ -1726,6 +1875,7 @@ function renderAdminLorryBatches() {
   container.innerHTML = sorted.map((batch) => {
     let statusColor = '#94a3b8';
     if (batch.status === 'Out for Delivery') statusColor = '#f59e0b';
+    if (batch.status === 'Paused') statusColor = '#fb923c';
     if (batch.status === 'Delivered') statusColor = '#4ade80';
 
     const stopsFillPct = batch.stops.length / STANDARD_VAN_MAX_STOPS;
@@ -1733,7 +1883,10 @@ function renderAdminLorryBatches() {
     const fillPct = batch.vehicleCategory === 'lorry'
       ? 100
       : Math.min(100, Math.round(Math.max(stopsFillPct, itemsFillPct) * 100));
-    const dispatchLabel = batch.vehicleCategory === 'lorry' ? 'DISPATCH LORRY' : 'DISPATCH VAN';
+    const isInstantBatch = (batch.deliveryMethod || 'standard') === 'instant' || batch.batchType === 'express';
+    const dispatchLabel = isInstantBatch
+      ? 'DISPATCH EXPRESS'
+      : (batch.vehicleCategory === 'lorry' ? 'DISPATCH LORRY' : 'DISPATCH VAN');
 
     const telemetry = batch.liveTelemetry || {};
     const nextStop = batch.stops.find((stop) => stop.status !== 'Delivered');
@@ -1778,7 +1931,7 @@ function renderAdminLorryBatches() {
               <div class="lorry-batch-admin-title">
                   <i class="fa-solid ${batch.vehicleIcon || 'fa-truck'}"></i>
                   <div>
-                      <strong>${batch.batchId} — ${batch.state}</strong>
+                      <strong>${batch.batchId} — ${batch.state} ${isInstantBatch ? '• INSTANT' : '• STANDARD'}</strong>
                       <small>${batch.vehicleType} • Plate ${batch.plateNo} • Driver: ${batch.courier}</small>
                       <div class="lorry-batch-fill-bar"><div class="lorry-batch-fill-bar-inner" style="width:${fillPct}%;"></div></div>
                       <small>${batch.stops.length} order(s) / ${batch.totalItems || 0} item(s) ${batch.vehicleCategory === 'lorry' ? '(upgraded to lorry)' : `(van limit: ${STANDARD_VAN_MAX_STOPS} orders / ${STANDARD_VAN_MAX_ITEMS} items)`} · <span style="color:${statusColor}; font-weight:bold;">${batch.status}</span></small><small style="color:var(--accent); display:block; margin-top:4px;">${liveSummary}</small>
@@ -1802,7 +1955,7 @@ function toggleOrderStatus(index) {
   const order = salesHistoryData[index];
   if (!order) return;
   if (order.batchId) {
-    alert('This order is part of a Standard Delivery batch. Dispatch/deliver it from the "Lorry Batches" tab instead.');
+    alert('This order is part of a dispatch batch. Dispatch or deliver it from the "Lorry Batches" tab instead.');
     return;
   }
   const currentStatus = order.status;
@@ -1873,7 +2026,7 @@ function openTrackingView(trackingNo, origin = 'customer') {
 
   if (order.status !== 'Out for Delivery' && order.status !== 'Delivered') {
     const msg = order.batchId
-      ? `Tracking Locked: Order status is currently "${order.status}". This order is waiting in a Standard Delivery batch (${order.batchId}) and will unlock once an admin dispatches that batch.`
+      ? `Tracking Locked: Order status is currently "${order.status}". This order is waiting in its dispatch batch (${order.batchId}) and will unlock once an admin dispatches that batch.`
       : `Tracking Locked: Order status is currently "${order.status}". The admin must update the status to "Out for Delivery" before live map tracking can be accessed.`;
     alert(msg);
     return;
@@ -3413,8 +3566,6 @@ function renderCostAnalytics() {
 
   const chartCtx = document.getElementById('costAnalyticsChart');
   if (chartCtx && typeof Chart !== 'undefined') {
-    if (costAnalyticsChartInstance) costAnalyticsChartInstance.destroy();
-
     const labels = sortedBuckets.map((b) => b.label);
     const datasets = Object.keys(VEHICLE_CATEGORY_META).map((cat) => {
       const meta = VEHICLE_CATEGORY_META[cat];
@@ -3430,26 +3581,33 @@ function renderCostAnalytics() {
       };
     });
 
-    costAnalyticsChartInstance = new Chart(chartCtx, {
-      type: 'line',
-      data: { labels, datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: true, labels: { color: '#ccc' } },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => `${ctx.dataset.label}: RM ${ctx.parsed.y.toFixed(2)}`
+    if (costAnalyticsChartInstance) {
+      costAnalyticsChartInstance.data.labels = labels;
+      costAnalyticsChartInstance.data.datasets = datasets;
+      costAnalyticsChartInstance.update('none');
+    } else {
+      costAnalyticsChartInstance = new Chart(chartCtx, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          plugins: {
+            legend: { display: true, labels: { color: '#ccc' } },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => `${ctx.dataset.label}: RM ${ctx.parsed.y.toFixed(2)}`
+              }
             }
+          },
+          scales: {
+            x: { grid: { color: '#222' }, ticks: { color: '#888' } },
+            y: { grid: { color: '#222' }, ticks: { color: '#888', callback: (v) => 'RM ' + v } }
           }
-        },
-        scales: {
-          x: { grid: { color: '#222' }, ticks: { color: '#888' } },
-          y: { grid: { color: '#222' }, ticks: { color: '#888', callback: (v) => 'RM ' + v } }
         }
-      }
-    });
+      });
+    }
   }
 
   const tbody = document.getElementById('cost-analytics-table-body');
@@ -3505,176 +3663,266 @@ function renderCostAnalytics() {
   }
 }
 
+function parseAnalyticsDate(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const numericDate = new Date(value);
+    return Number.isNaN(numericDate.getTime()) ? null : numericDate;
+  }
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+  const match = raw.match(/([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})/);
+  if (!match) return null;
+  const fallback = new Date(`${match[1]} ${match[2]}, ${match[3]}`);
+  return Number.isNaN(fallback.getTime()) ? null : fallback;
+}
+
+function analyticsOrderDate(order) {
+  return parseAnalyticsDate(order?.createdAt || order?.date || order?.orderDate);
+}
+
+function analyticsOrderAmount(order) {
+  const numeric = Number(String(order?.amount ?? order?.total ?? 0).replace(/[^0-9.-]/g, ''));
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function analyticsIsRevenueOrder(order) {
+  return !['cancelled', 'canceled', 'refunded', 'failed'].includes(String(order?.status || '').toLowerCase());
+}
+
+function createAnalyticsMonthSeries() {
+  const now = new Date();
+  return Array.from({ length: 12 }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - 11 + index, 1);
+    return {
+      key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
+      label: date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+      revenue: 0,
+      orders: 0,
+      signups: 0
+    };
+  });
+}
+
+function getAnalyticsCategoryForName(name) {
+  const lower = String(name || '').toLowerCase();
+  const product = products.find((item) => String(item?.name || '').toLowerCase() === lower);
+  if (product?.category) return String(product.category).toLowerCase();
+  if (lower.includes('hoodie') || lower.includes('windbreaker') || lower.includes('jacket') || lower.includes('outer')) return 'outerwear';
+  if (lower.includes('tee') || lower.includes('top') || lower.includes('shirt')) return 'tops';
+  if (lower.includes('pant') || lower.includes('cargo') || lower.includes('bottom')) return 'bottoms';
+  return null;
+}
+
+function getAnalyticsOrderItems(order) {
+  if (Array.isArray(order?.itemsDetail) && order.itemsDetail.length > 0) return order.itemsDetail;
+  return [{ name: order?.items || '', qty: Number(order?.qty || 1) }];
+}
+
+function calculateCategoryShareData(timeframe) {
+  const totals = { outerwear: 0, tops: 0, bottoms: 0 };
+  const now = new Date();
+
+  salesHistoryData.forEach((order) => {
+    if (!analyticsIsRevenueOrder(order)) return;
+    const date = analyticsOrderDate(order);
+    if (timeframe === 'month' && (!date || date.getFullYear() !== now.getFullYear() || date.getMonth() !== now.getMonth())) return;
+    if (timeframe === 'year' && (!date || date.getFullYear() !== now.getFullYear())) return;
+
+    getAnalyticsOrderItems(order).forEach((item) => {
+      const category = getAnalyticsCategoryForName(item?.name);
+      const qty = Math.max(1, Number(item?.qty || 1));
+      if (category === 'outerwear' || category === 'tops' || category === 'bottoms') totals[category] += qty;
+    });
+  });
+
+  return [totals.outerwear, totals.tops, totals.bottoms];
+}
+
+function updateAnalyticsKpis(monthSeries) {
+  const now = new Date();
+  const revenueOrders = salesHistoryData.filter(analyticsIsRevenueOrder);
+  const currentMonthSales = revenueOrders.reduce((sum, order) => {
+    const date = analyticsOrderDate(order);
+    return date && date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth()
+      ? sum + analyticsOrderAmount(order)
+      : sum;
+  }, 0);
+  const yearlySales = revenueOrders.reduce((sum, order) => {
+    const date = analyticsOrderDate(order);
+    return date && date.getFullYear() === now.getFullYear() ? sum + analyticsOrderAmount(order) : sum;
+  }, 0);
+  const pendingOrders = salesHistoryData.filter((order) => ['pending', 'forming'].includes(String(order?.status || '').toLowerCase())).length;
+  const deliveredOrders = salesHistoryData.filter((order) => String(order?.status || '').toLowerCase() === 'delivered').length;
+  const activeBatches = lorryBatches.filter((batch) => !['Delivered', 'Completed'].includes(String(batch?.status || ''))).length;
+
+  const values = {
+    'stat-monthly-sales': `RM ${currentMonthSales.toFixed(2)}`,
+    'stat-yearly-sales': `RM ${yearlySales.toFixed(2)}`,
+    'stat-total-users': String(getRegisteredUsersList().length),
+    'stat-total-orders': String(salesHistoryData.length),
+    'stat-pending-orders': String(pendingOrders),
+    'stat-delivered-orders': String(deliveredOrders),
+    'stat-active-batches': String(activeBatches)
+  };
+  Object.entries(values).forEach(([id, text]) => {
+    const element = document.getElementById(id);
+    if (element) element.innerText = text;
+  });
+
+  const liveSync = document.getElementById('analytics-live-sync');
+  if (liveSync) liveSync.innerText = `LIVE FIREBASE SYNC • ${new Date().toLocaleTimeString('en-MY')}`;
+}
+
 function initAdminCharts() {
   const salesCtx = document.getElementById('salesChart');
   const signupCtx = document.getElementById('signupChart');
   const categoryCtx = document.getElementById('categoryChart');
+  const monthSeries = createAnalyticsMonthSeries();
 
-  if (!salesCtx || !signupCtx || !categoryCtx) return;
-
-  if (salesChartInstance) salesChartInstance.destroy();
-  if (signupChartInstance) signupChartInstance.destroy();
-  if (categoryChartInstance) categoryChartInstance.destroy();
-
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const monthlyRevenue = new Array(12).fill(0);
-
-  let totalYearlySales = 0;
-  let currentMonthSales = 0;
-  const currentMonthName = new Date().toLocaleString('en-US', { month: 'short' });
-
-  salesHistoryData.forEach((order) => {
-    let orderAmount = order.amount || 0;
-    totalYearlySales += orderAmount;
-
-    months.forEach((m, idx) => {
-      if (order.date.includes(m)) {
-        monthlyRevenue[idx] += orderAmount;
-        if (m === currentMonthName) {
-          currentMonthSales += orderAmount;
-        }
-      }
-    });
+  salesHistoryData.filter(analyticsIsRevenueOrder).forEach((order) => {
+    const date = analyticsOrderDate(order);
+    if (!date) return;
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const bucket = monthSeries.find((item) => item.key === key);
+    if (bucket) {
+      bucket.revenue += analyticsOrderAmount(order);
+      bucket.orders += 1;
+    }
   });
 
-  const allUsers = getRegisteredUsersList();
-  const totalUsersCount = allUsers.length;
+  getRegisteredUsersList().forEach((user) => {
+    const date = parseAnalyticsDate(user?.createdAt || user?.createdDate || user?.registeredAt);
+    if (!date) return;
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const bucket = monthSeries.find((item) => item.key === key);
+    if (bucket) bucket.signups += 1;
+  });
 
-  const monthlyEl = document.getElementById('stat-monthly-sales');
-  const yearlyEl = document.getElementById('stat-yearly-sales');
-  const usersEl = document.getElementById('stat-total-users');
+  updateAnalyticsKpis(monthSeries);
+  if (typeof Chart === 'undefined' || !salesCtx || !signupCtx || !categoryCtx) return;
 
-  if (monthlyEl) monthlyEl.innerText = `RM ${currentMonthSales.toFixed(2)}`;
-  if (yearlyEl) yearlyEl.innerText = `RM ${totalYearlySales.toFixed(2)}`;
-  if (usersEl) usersEl.innerText = totalUsersCount.toString();
+  const labels = monthSeries.map((item) => item.label);
+  const revenueData = monthSeries.map((item) => Number(item.revenue.toFixed(2)));
+  const signupData = monthSeries.map((item) => item.signups);
+  const categoryData = calculateCategoryShareData(document.getElementById('timeframe-select')?.value || 'year');
 
-  const chartLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'];
-  const chartData = monthlyRevenue.slice(0, 7);
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { grid: { color: '#222' }, ticks: { color: '#888' } },
+      y: { grid: { color: '#222' }, ticks: { color: '#888' }, beginAtZero: true }
+    }
+  };
 
-  salesChartInstance = new Chart(salesCtx, {
-    type: 'line',
-    data: {
-      labels: chartLabels,
-      datasets: [
-        {
+  if (salesChartInstance) {
+    salesChartInstance.data.labels = labels;
+    salesChartInstance.data.datasets[0].data = revenueData;
+    salesChartInstance.update('none');
+  } else {
+    salesChartInstance = new Chart(salesCtx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
           label: 'Revenue (RM)',
-          data: chartData,
+          data: revenueData,
           borderColor: '#ffffff',
           backgroundColor: 'rgba(255,255,255,0.08)',
           borderWidth: 2,
           fill: true,
-          tension: 0.3,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { grid: { color: '#222' }, ticks: { color: '#888' } },
-        y: { grid: { color: '#222' }, ticks: { color: '#888' } },
+          tension: 0.3
+        }]
       },
-    },
-  });
-
-  const userSignups = [1, 2, 1, 3, 2, 3, totalUsersCount];
-
-  signupChartInstance = new Chart(signupCtx, {
-    type: 'bar',
-    data: {
-      labels: chartLabels,
-      datasets: [
-        {
-          label: 'Registered Users',
-          data: userSignups,
-          backgroundColor: '#818cf8',
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { grid: { color: '#222' }, ticks: { color: '#888' } },
-        y: { grid: { color: '#222' }, ticks: { color: '#888' }, precision: 0 },
-      },
-    },
-  });
-
-  let catData = calculateCategoryShareData('year');
-
-  categoryChartInstance = new Chart(categoryCtx, {
-    type: 'doughnut',
-    data: {
-      labels: ['Outerwear', 'Tops', 'Bottoms'],
-      datasets: [
-        {
-          data: catData,
-          backgroundColor: ['#ffffff', '#818cf8', '#4b5563'],
-          borderWidth: 0,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      cutout: '62%',
-      plugins: {
-        legend: {
-          position: 'bottom',
-          labels: {
-            color: '#fff',
-            font: { family: 'Space Grotesk', size: 12 },
-            padding: 16,
-            boxWidth: 14,
-          },
-        },
-      },
-    },
-  });
-}
-
-function calculateCategoryShareData(timeframe) {
-  let outerwearCount = 0;
-  let topsCount = 0;
-  let bottomsCount = 0;
-
-  const currentMonthName = new Date().toLocaleString('en-US', { month: 'short' });
-
-  salesHistoryData.forEach((order) => {
-    if (timeframe === 'month' && !order.date.includes(currentMonthName)) {
-      return;
-    }
-
-    const lowerItems = order.items.toLowerCase();
-
-    if (lowerItems.includes('hoodie') || lowerItems.includes('windbreaker') || lowerItems.includes('jacket')) {
-      outerwearCount += order.qty || 1;
-    }
-    if (lowerItems.includes('tee') || lowerItems.includes('top') || lowerItems.includes('shirt')) {
-      topsCount += order.qty || 1;
-    }
-    if (lowerItems.includes('pants') || lowerItems.includes('cargo') || lowerItems.includes('bottom')) {
-      bottomsCount += order.qty || 1;
-    }
-  });
-
-  if (outerwearCount === 0 && topsCount === 0 && bottomsCount === 0) {
-    return [50, 30, 20];
+      options: chartOptions
+    });
   }
 
-  return [outerwearCount, topsCount, bottomsCount];
+  if (signupChartInstance) {
+    signupChartInstance.data.labels = labels;
+    signupChartInstance.data.datasets[0].data = signupData;
+    signupChartInstance.update('none');
+  } else {
+    signupChartInstance = new Chart(signupCtx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'New registered users',
+          data: signupData,
+          backgroundColor: '#818cf8'
+        }]
+      },
+      options: {
+        ...chartOptions,
+        scales: {
+          ...chartOptions.scales,
+          y: { ...chartOptions.scales.y, precision: 0, ticks: { color: '#888', precision: 0 } }
+        }
+      }
+    });
+  }
+
+  if (categoryChartInstance) {
+    categoryChartInstance.data.datasets[0].data = categoryData;
+    categoryChartInstance.update('none');
+  } else {
+    categoryChartInstance = new Chart(categoryCtx, {
+      type: 'doughnut',
+      data: {
+        labels: ['Outerwear', 'Tops', 'Bottoms'],
+        datasets: [{
+          data: categoryData,
+          backgroundColor: ['#ffffff', '#818cf8', '#4b5563'],
+          borderWidth: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        cutout: '62%',
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: { color: '#fff', font: { family: 'Space Grotesk', size: 12 }, padding: 16, boxWidth: 14 }
+          }
+        }
+      }
+    });
+  }
 }
 
 function updateCategoryChart() {
-  const timeframe = document.getElementById('timeframe-select').value;
-  if (!categoryChartInstance) return;
+  const timeframe = document.getElementById('timeframe-select')?.value || 'year';
+  if (!categoryChartInstance) {
+    scheduleAnalyticsRefresh();
+    return;
+  }
 
-  const dynamicCatData = calculateCategoryShareData(timeframe);
-  categoryChartInstance.data.datasets[0].data = dynamicCatData;
-  categoryChartInstance.update();
+  categoryChartInstance.data.datasets[0].data = calculateCategoryShareData(timeframe);
+  categoryChartInstance.update('none');
+}
+
+let analyticsRefreshTimer = null;
+let analyticsRefreshPending = false;
+
+function scheduleAnalyticsRefresh() {
+  analyticsRefreshPending = true;
+  if (analyticsRefreshTimer !== null) return;
+
+  analyticsRefreshTimer = window.setTimeout(() => {
+    analyticsRefreshTimer = null;
+    if (!analyticsRefreshPending) return;
+    analyticsRefreshPending = false;
+    initAdminCharts();
+    renderCostAnalytics();
+  }, 250);
 }
 
 function toggleMenu() {
@@ -3707,6 +3955,7 @@ function bootFirebase() {
     if (value) {
       products = firebaseToArray(value).map(normalizeProductImage);
       renderAdminProducts();
+      scheduleAnalyticsRefresh();
     } else {
       saveProductsToCloud();
     }
@@ -3715,22 +3964,23 @@ function bootFirebase() {
   window.VoidFirebaseStore.subscribe('sales_history', (value) => {
     if (value) {
       salesHistoryData = firebaseToArray(value);
+      adminSalesLoaded = true;
+      ensureOpenOrdersHaveDispatchBatches();
       renderAdminSalesHistory();
-      initAdminCharts();
-      renderCostAnalytics();
+      scheduleAnalyticsRefresh();
     } else {
-      saveSalesHistory();
+      salesHistoryData = [];
+      adminSalesLoaded = true;
     }
   });
 
   window.VoidFirebaseStore.subscribe('lorry_batches', (value) => {
-    if (value) {
-      lorryBatches = firebaseToArray(value);
-      renderAdminLorryBatches();
-      refreshOpenLorryTrackingFromFirebase();
-    } else {
-      saveLorryBatches();
-    }
+    lorryBatches = value ? firebaseToArray(value) : [];
+    adminBatchesLoaded = true;
+    ensureOpenOrdersHaveDispatchBatches();
+    renderAdminLorryBatches();
+    scheduleAnalyticsRefresh();
+    refreshOpenLorryTrackingFromFirebase();
   });
 
   window.VoidFirebaseStore.subscribe('users', (value) => {
@@ -3738,6 +3988,7 @@ function bootFirebase() {
     renderAdminUsers();
     const totalUsers = document.getElementById('stat-total-users');
     if (totalUsers) totalUsers.innerText = String(registeredUsers.length);
+    scheduleAnalyticsRefresh();
   });
 
   window.VoidFirebaseStore.subscribe('notifications', (value) => {
@@ -3746,9 +3997,10 @@ function bootFirebase() {
 
   window.VoidFirebaseStore.subscribe('hero_slides', (value) => {
     if (value) {
-      heroSlides = firebaseToArray(value);
+      heroSlides = normalizeHeroSlides(firebaseToArray(value).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)));
       renderAdminSlides();
-    } else {
+      populateSlideProductDropdown();
+    } else if (heroSlides.length > 0) {
       saveSlidesToCloud();
     }
   });
@@ -3780,8 +4032,7 @@ function initApp() {
   populateSlideProductDropdown();
   setupEventListeners();
   renderNotifications();
-  setTimeout(initAdminCharts, 100);
-  setTimeout(renderCostAnalytics, 100);
+  setTimeout(scheduleAnalyticsRefresh, 100);
   bootFirebase();
   checkAndAutoCompleteDeliveries();
   checkAndProgressLorryBatches();
