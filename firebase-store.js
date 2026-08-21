@@ -289,6 +289,36 @@
     attach();
   }
 
+  function subscribeUserNotifications(callback) {
+    const attach = () => {
+      if (!firebaseReady() || !currentAuthUser()) {
+        setTimeout(attach, 250);
+        return;
+      }
+      const authUser = currentAuthUser();
+      const email = String(authUser.email || '').toLowerCase();
+      if (!email) {
+        callback(null);
+        return;
+      }
+      const notificationQuery = typeof window.dbQuery === 'function'
+        && typeof window.dbOrderByChild === 'function'
+        && typeof window.dbEqualTo === 'function'
+        ? window.dbQuery(
+            window.dbRef(window.firebaseDb, 'notifications'),
+            window.dbOrderByChild('userId'),
+            window.dbEqualTo(email)
+          )
+        : window.dbRef(window.firebaseDb, 'notifications');
+      window.dbOnValue(
+        notificationQuery,
+        (snapshot) => callback(snapshot.exists() ? snapshot.val() : null, snapshot),
+        (error) => console.error('Firebase user notification subscription failed:', error)
+      );
+    };
+    attach();
+  }
+
   function getSessionUser() {
     return currentSessionUser();
   }
@@ -311,6 +341,7 @@
     readArray,
     write,
     subscribe,
+    subscribeUserNotifications,
     valuesAsArray,
     sanitizeUserRecord,
     dedupeSalesHistory,

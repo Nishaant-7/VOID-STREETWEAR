@@ -119,11 +119,31 @@
                     </div>
 
                     <section id="admin-inquiry-center" class="admin-inquiry-center" style="margin: 1.5rem 0;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap;">
-                            <h3 style="font-family:var(--font-heading); margin:0;">NOTIFICATIONS & CUSTOMER INQUIRIES</h3>
-                            <small id="admin-inquiry-sync" style="color:var(--success);">LIVE FIREBASE SYNC</small>
+                        <div class="admin-activity-header">
+                            <div>
+                                <h3>OPERATIONS INBOX</h3>
+                                <small id="admin-inquiry-sync">LIVE FIREBASE SYNC</small>
+                            </div>
+                            <div class="admin-activity-metrics">
+                                <button type="button" class="admin-activity-tab active" data-admin-activity-tab="inquiries" onclick="setAdminActivityPanel('inquiries')">INQUIRIES <strong id="admin-inquiry-count">0</strong></button>
+                                <button type="button" class="admin-activity-tab" data-admin-activity-tab="tracking" onclick="setAdminActivityPanel('tracking')">TRACKING <strong id="admin-tracking-count">0</strong></button>
+                            </div>
                         </div>
-                        <div id="admin-inquiry-list" style="margin-top:0.8rem;"></div>
+                        <div class="admin-activity-toolbar">
+                            <select id="admin-inquiry-status-filter" onchange="setAdminInquiryFilter(this.value)">
+                                <option value="open">Open inquiries</option>
+                                <option value="all">All inquiries</option>
+                                <option value="replied">Replied</option>
+                                <option value="closed">Closed</option>
+                            </select>
+                            <input id="admin-activity-search" type="search" placeholder="Search customer, order, or message" oninput="setAdminActivitySearch(this.value)">
+                        </div>
+                        <div class="admin-activity-workspace">
+                            <div id="admin-inquiry-list" class="admin-activity-list"></div>
+                            <div id="admin-inquiry-detail" class="admin-activity-detail">
+                                <div class="admin-activity-empty">Select an inquiry or tracking event to view its details.</div>
+                            </div>
+                        </div>
                     </section>
                     
                     <div class="charts-grid">

@@ -370,7 +370,10 @@ async function waitForAdminFirebaseAuth(timeoutMs = 8000) {
   const authReady = typeof window.VoidFirebaseStore?.waitForAuth === 'function'
     ? await window.VoidFirebaseStore.waitForAuth(timeoutMs)
     : !!window.VoidFirebaseStore?.currentAuthUser();
-  return !!(authReady && window.VoidFirebaseStore?.currentAuthUser() && getAdminSession()?.role === 'admin');
+  const session = typeof getAdminSession === 'function'
+    ? getAdminSession()
+    : window.VoidFirebaseStore?.getSessionUser?.();
+  return !!(authReady && window.VoidFirebaseStore?.currentAuthUser() && session?.role === 'admin');
 }
 
 function normalizeHeroSlides(slides) {
@@ -503,6 +506,9 @@ function findOrCreateLorryBatch(state, options = {}) {
     status: 'Forming',
     vehicleType: vehicle.type,
     vehicleCategory: vehicle.category || (isInstant ? 'motorcycle' : 'van'),
+    assignmentReason: isInstant
+      ? `${vehicle.category === 'motorcycle' ? 'Motorcycle' : 'Car'} selected for Instant delivery using the 8-item / 45-km capacity rule.`
+      : 'Van selected for Standard delivery; the batch upgrades to a lorry above 20 orders or 55 items.',
     vehicleIcon: vehicle.icon || (isInstant ? 'fa-motorcycle' : 'fa-truck'),
     consumptionRate: vehicle.consumptionLperKm,
     tankCapacity: vehicle.tankCapacityL,
@@ -539,6 +545,7 @@ function upgradeBatchToLorry(batch) {
   batch.tankCapacity = vehicle.tankCapacityL;
   batch.plateNo = 'VLR ' + Math.floor(1000 + Math.random() * 9000);
 
+  batch.assignmentReason = `Lorry selected because this Standard batch exceeded ${STANDARD_VAN_MAX_STOPS} orders or ${STANDARD_VAN_MAX_ITEMS} items.`;
   batch.history.push({
     time: Date.now(),
     text: `Batch ${batch.batchId} for ${batch.state} grew past van capacity (${STANDARD_VAN_MAX_STOPS} orders / ${STANDARD_VAN_MAX_ITEMS} items) with ${batch.stops.length} order(s) and ${batch.totalItems} item(s) queued. Upgraded from Van ${previousPlate} to Lorry ${batch.plateNo} (${batch.vehicleType}) to carry the extra volume in one trip.`
@@ -616,6 +623,18 @@ function getDispatchVehicleLabel(batch) {
   return batch.vehicleCategory === 'lorry'
     ? `Lorry ${batch.plateNo || ''}`.trim()
     : `Van ${batch.plateNo || ''}`.trim();
+}
+
+function getVehicleAssignmentExplanation(batch) {
+  if (!batch) return 'No vehicle assignment is available.';
+  if (batch.assignmentReason) return batch.assignmentReason;
+  if (batch.vehicleCategory === 'lorry') return `Lorry selected because the Standard batch exceeded ${STANDARD_VAN_MAX_STOPS} orders or ${STANDARD_VAN_MAX_ITEMS} items.`;
+  if ((batch.deliveryMethod || 'standard') === 'instant' || batch.batchType === 'express') {
+    return batch.vehicleCategory === 'motorcycle'
+      ? 'Motorcycle selected for Instant delivery within 8 items and 45 km.'
+      : 'Car selected for Instant delivery because the order volume or route exceeded motorcycle capacity.';
+  }
+  return 'Van selected for Standard delivery; it upgrades to a lorry above capacity.';
 }
 
 function dispatchLorryBatch(batchId, options = {}) {
@@ -1028,27 +1047,65 @@ function escapeHtml(value) {
   }[char]));
 }
 
+function normalizeTransportVehicleCategory(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (['motorcycle', 'motorbike', 'bike'].includes(raw) || raw.includes('motorcycle') || raw.includes('motorbike')) return 'motorcycle';
+  if (['car', 'sedan'].includes(raw) || raw.includes('car')) return 'car';
+  if (['van', 'minivan'].includes(raw) || raw.includes('van')) return 'van';
+  if (['lorry', 'truck'].includes(raw) || raw.includes('lorry') || raw.includes('truck') || raw.includes('npr') || raw.includes('hino')) return 'lorry';
+  return '';
+}
+
+function getBatchRouteDistanceKm(batch) {
+  if (!batch) return 0;
+  const stored = Number(batch.totalDistanceKm ?? batch.routeDistanceKm ?? batch.distanceKm ?? 0) || 0;
+  if (stored > 0) return stored;
+  const stops = firebaseToArray(batch.stops).filter((stop) => Number.isFinite(Number(stop?.lat)) && Number.isFinite(Number(stop?.lng)));
+  if (!stops.length || typeof haversineMeters !== 'function') return 0;
+  let totalMeters = 0;
+  let previous = HUB_START_COORDS;
+  stops.forEach((stop) => {
+    const next = [Number(stop.lat), Number(stop.lng)];
+    totalMeters += haversineMeters(previous, next);
+    previous = next;
+  });
+  return totalMeters / 1000;
+}
+
 function getOrderVehicleCategory(order) {
-  const direct = String(order?.vehicleCategory || '').toLowerCase();
-  if (['motorcycle', 'car', 'van', 'lorry'].includes(direct)) return direct;
-  const batch = order?.batchId ? lorryBatches.find((item) => item.batchId === order.batchId) : null;
-  const batchCategory = String(batch?.vehicleCategory || '').toLowerCase();
-  if (['motorcycle', 'car', 'van', 'lorry'].includes(batchCategory)) return batchCategory;
-  if (String(order?.deliveryMethod || '').toLowerCase() === 'instant') return String(order?.dispatchVehicle?.category || 'motorcycle').toLowerCase();
+  const batch = order?.batchId ? lorryBatches.find((item) => String(item.batchId) === String(order.batchId)) : null;
+  // The linked batch is authoritative because a standard van batch can later be upgraded to a lorry.
+  const batchCategory = normalizeTransportVehicleCategory(batch?.vehicleCategory || batch?.vehicleType);
+  if (batchCategory) return batchCategory;
+
+  const direct = normalizeTransportVehicleCategory(order?.vehicleCategory || order?.vehicleType);
+  if (direct) return direct;
+
+  if (String(order?.deliveryMethod || '').toLowerCase() === 'instant') {
+    return normalizeTransportVehicleCategory(order?.dispatchVehicle?.category) || 'motorcycle';
+  }
   return 'van';
 }
 
 function getOrderTransportMetrics(order) {
-  const batch = order?.batchId ? lorryBatches.find((item) => item.batchId === order.batchId) : null;
+  const batch = order?.batchId ? lorryBatches.find((item) => String(item.batchId) === String(order.batchId)) : null;
   const vehicleCategory = getOrderVehicleCategory(order);
-  const distanceKm = Math.max(0, Number(order?.distanceKm ?? order?.routeDistanceKm ?? order?.distance ?? batch?.distanceKm ?? batch?.totalDistanceKm ?? 0) || 0);
-  const consumptionRate = Number(order?.consumptionRate || batch?.consumptionRate || ({ motorcycle: 0.025, car: 0.07, van: 0.11, lorry: 0.18 }[vehicleCategory] || 0.11));
-  const fuelUsedL = Math.max(0, Number(order?.fuelUsedL ?? (distanceKm * consumptionRate)) || 0);
+  const batchDistanceKm = getBatchRouteDistanceKm(batch);
+  const stop = batch ? firebaseToArray(batch.stops).find((item) => String(item?.orderId) === String(order?.orderId)) : null;
+  const storedDistanceKm = Number(order?.distanceKm ?? order?.routeDistanceKm ?? order?.distance ?? stop?.distanceKm ?? 0) || 0;
+  const distanceKm = Math.max(0, storedDistanceKm > 0 ? storedDistanceKm : batchDistanceKm);
+  const defaultRate = { motorcycle: 0.025, car: 0.07, van: 0.11, lorry: 0.18 }[vehicleCategory] || 0.11;
+  const consumptionRate = Math.max(0, Number(order?.consumptionRate || batch?.consumptionRate || defaultRate) || defaultRate);
+  const storedFuelUsedL = Number(order?.fuelUsedL || 0) || 0;
+  const fuelUsedL = Math.max(0, storedFuelUsedL > 0 ? storedFuelUsedL : distanceKm * consumptionRate);
   const fuelCostRM = fuelUsedL * FUEL_PRICE_PER_LITRE_RM;
-  const tollCostRM = vehicleCategory === 'motorcycle'
+  const defaultTollRM = vehicleCategory === 'motorcycle'
     ? 0
-    : Math.max(0, Number(order?.tollCostRM ?? (distanceKm * (TOLL_RATE_RM_PER_KM[vehicleCategory] || 0))) || 0);
-  const totalCostRM = Math.max(0, Number(order?.deliveryCostRM ?? (fuelCostRM + tollCostRM)) || 0);
+    : distanceKm * (TOLL_RATE_RM_PER_KM[vehicleCategory] || 0);
+  const storedTollRM = Number(order?.tollCostRM || 0) || 0;
+  const tollCostRM = Math.max(0, storedTollRM > 0 ? storedTollRM : defaultTollRM);
+  const storedTotalRM = Number(order?.deliveryCostRM || 0) || 0;
+  const totalCostRM = Math.max(0, storedTotalRM > 0 ? storedTotalRM : fuelCostRM + tollCostRM);
   return { vehicleCategory, distanceKm, fuelUsedL, fuelCostRM, tollCostRM, totalCostRM };
 }
 
@@ -1234,44 +1291,147 @@ function renderNotifications() {
   });
 }
 
+let adminActivityPanel = 'inquiries';
+let adminInquiryFilter = 'open';
+let adminActivitySearch = '';
+let adminSelectedActivityKey = null;
+
+function setAdminActivityPanel(panel) {
+  adminActivityPanel = panel === 'tracking' ? 'tracking' : 'inquiries';
+  document.querySelectorAll('[data-admin-activity-tab]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.adminActivityTab === adminActivityPanel);
+  });
+  renderAdminInquiryCenter();
+}
+
+function setAdminInquiryFilter(filter) {
+  adminInquiryFilter = ['all', 'open', 'replied', 'closed'].includes(filter) ? filter : 'open';
+  adminSelectedActivityKey = null;
+  renderAdminInquiryCenter();
+}
+
+function setAdminActivitySearch(value) {
+  adminActivitySearch = String(value || '').trim().toLowerCase();
+  adminSelectedActivityKey = null;
+  renderAdminInquiryCenter();
+}
+
+function getActivityKey(notification) {
+  return String(notification?.notificationId || notification?.id || '');
+}
+
 function getInquiryThreads() {
   return notifications
     .filter((notification) => notification && (notification.type === 'inquiry' || notification.extraData?.type === 'inquiry'))
     .sort((a, b) => Number(b.updatedAt || b.createdAt || b.id || 0) - Number(a.updatedAt || a.createdAt || a.id || 0));
 }
 
+function getAdminTrackingActivity() {
+  return notifications
+    .filter((notification) => notification && (notification.type === 'tracking' || notification.extraData?.type === 'tracking'))
+    .sort((a, b) => Number(b.createdAt || b.id || 0) - Number(a.createdAt || a.id || 0));
+}
+
+function activityMatchesSearch(notification) {
+  if (!adminActivitySearch) return true;
+  const haystack = [
+    notification.title,
+    notification.message,
+    notification.userId,
+    notification.customerName,
+    notification.customerEmail,
+    notification.trackingNo,
+    notification.extraData?.orderId,
+    notification.extraData?.dispatchId
+  ].filter(Boolean).join(' ').toLowerCase();
+  return haystack.includes(adminActivitySearch);
+}
+
+function selectAdminActivity(encodedKey) {
+  adminSelectedActivityKey = decodeURIComponent(String(encodedKey || ''));
+  renderAdminInquiryCenter();
+}
+
+function renderAdminActivityDetail(selected) {
+  const detail = document.getElementById('admin-inquiry-detail');
+  if (!detail) return;
+  if (!selected) {
+    detail.innerHTML = '<div class="admin-activity-empty">Select an inquiry or tracking event to view its details.</div>';
+    return;
+  }
+
+  const key = getActivityKey(selected);
+  const isInquiry = selected.type === 'inquiry' || selected.extraData?.type === 'inquiry';
+  const replies = Array.isArray(selected.replies) ? selected.replies : [];
+  const replyHtml = replies.length
+    ? `<div class="admin-activity-replies"><h4>CONVERSATION</h4>${replies.map((reply) => `<div class="admin-inquiry-reply"><strong>${escapeHtml(reply.senderRole || 'reply')}</strong><small>${escapeHtml(reply.date || '')}</small><p>${escapeHtml(reply.message || '')}</p></div>`).join('')}</div>`
+    : '<div class="admin-activity-no-replies">No replies yet.</div>';
+
+  detail.innerHTML = `<div class="admin-activity-detail-header">
+      <div>
+        <span class="admin-activity-kicker">${isInquiry ? 'CUSTOMER INQUIRY' : 'TRACKING EVENT'}</span>
+        <h4>${escapeHtml(selected.title || (isInquiry ? 'Customer Inquiry' : 'Tracking Activity'))}</h4>
+        <small>${escapeHtml(selected.customerName || selected.userId || 'VOID customer')} · ${escapeHtml(selected.customerEmail || selected.date || '')}</small>
+      </div>
+      <span class="status-badge">${escapeHtml(selected.status || (selected.read ? 'read' : 'new'))}</span>
+    </div>
+    <p class="admin-activity-detail-message">${escapeHtml(selected.message || 'No message available.')}</p>
+    ${selected.trackingNo ? `<div class="admin-activity-tracking-code">TRACKING <strong>${escapeHtml(selected.trackingNo)}</strong></div>` : ''}
+    ${isInquiry ? `${replyHtml}<div class="admin-inquiry-reply-form admin-activity-reply-form">
+      <textarea id="inquiry-reply-${encodeURIComponent(key)}" rows="3" placeholder="Reply privately to this customer..."></textarea>
+      <button type="button" class="admin-action-btn" onclick="replyToCustomerInquiry('${encodeURIComponent(key)}')">SEND REPLY</button>
+    </div>` : `<div class="admin-activity-detail-meta">This event is visible to the addressed customer only and is retained as a read-only tracking record here.</div>`}`;
+}
+
 function renderAdminInquiryCenter() {
   const list = document.getElementById('admin-inquiry-list');
   if (!list) return;
-  const threads = getInquiryThreads();
-  const trackingActivity = notifications
-    .filter((notification) => notification && (notification.type === 'tracking' || notification.extraData?.type === 'tracking'))
-    .sort((a, b) => Number(b.createdAt || b.id || 0) - Number(a.createdAt || a.id || 0))
-    .slice(0, 20);
+
+  const allThreads = getInquiryThreads();
+  const trackingActivity = getAdminTrackingActivity();
+  const filteredThreads = allThreads.filter((thread) => {
+    const status = String(thread.status || 'open').toLowerCase();
+    const statusMatches = adminInquiryFilter === 'all' || status === adminInquiryFilter;
+    return statusMatches && activityMatchesSearch(thread);
+  });
+  const filteredTracking = trackingActivity.filter(activityMatchesSearch).slice(0, 50);
+  const activeItems = adminActivityPanel === 'tracking' ? filteredTracking : filteredThreads;
+  const activeKey = activeItems.some((item) => getActivityKey(item) === adminSelectedActivityKey)
+    ? adminSelectedActivityKey
+    : getActivityKey(activeItems[0]);
+  adminSelectedActivityKey = activeKey || null;
+
   const sync = document.getElementById('admin-inquiry-sync');
   if (sync) sync.innerText = `LIVE FIREBASE SYNC • ${new Date().toLocaleTimeString('en-MY')}`;
-  const inquiryHtml = threads.length
-    ? threads.map((thread) => {
-    const threadKey = encodeURIComponent(String(thread.notificationId || thread.id));
-    const replies = Array.isArray(thread.replies) ? thread.replies : [];
-    return `<article class="admin-inquiry-card">
-      <div class="admin-inquiry-card-header">
-        <div><strong>${escapeHtml(thread.customerName || thread.extraData?.customerName || thread.userId)}</strong><small>${escapeHtml(thread.customerEmail || thread.userId)} · ${escapeHtml(thread.date || '')}</small></div>
-        <span class="status-badge">${escapeHtml(thread.status || 'open')}</span>
-      </div>
-      <p class="admin-inquiry-message">${escapeHtml(thread.message)}</p>
-      ${replies.map((reply) => `<div class="admin-inquiry-reply"><strong>${escapeHtml(reply.senderRole || 'reply')}</strong><small>${escapeHtml(reply.date || '')}</small><p>${escapeHtml(reply.message)}</p></div>`).join('')}
-      <div class="admin-inquiry-reply-form">
-        <textarea id="inquiry-reply-${threadKey}" rows="2" placeholder="Reply to this customer inquiry..."></textarea>
-        <button type="button" class="admin-action-btn" onclick="replyToCustomerInquiry('${threadKey}')">SEND REPLY</button>
-      </div>
-    </article>`;
-  }).join('')
-    : '<div class="admin-inquiry-empty">No customer inquiries yet.</div>';
-  const trackingHtml = trackingActivity.length
-    ? `<h4 style="font-family:var(--font-heading); margin:1.2rem 0 0.5rem;">RECENT TRACKING ACTIVITY</h4>${trackingActivity.map((notification) => `<div class="admin-inquiry-card"><strong>${escapeHtml(notification.title)}</strong><small>${escapeHtml(notification.date || '')} · ${escapeHtml(notification.userId || '')}</small><p class="admin-inquiry-message">${escapeHtml(notification.message)}</p></div>`).join('')}`
-    : '<h4 style="font-family:var(--font-heading); margin:1.2rem 0 0.5rem;">RECENT TRACKING ACTIVITY</h4><div class="admin-inquiry-empty">No tracking activity yet.</div>';
-  list.innerHTML = inquiryHtml + trackingHtml;
+  const inquiryCount = document.getElementById('admin-inquiry-count');
+  const trackingCount = document.getElementById('admin-tracking-count');
+  if (inquiryCount) inquiryCount.innerText = String(allThreads.filter((thread) => String(thread.status || 'open').toLowerCase() === 'open').length);
+  if (trackingCount) trackingCount.innerText = String(trackingActivity.length);
+
+  document.querySelectorAll('[data-admin-activity-tab]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.adminActivityTab === adminActivityPanel);
+  });
+
+  if (!activeItems.length) {
+    list.innerHTML = `<div class="admin-activity-empty">No ${adminActivityPanel === 'tracking' ? 'tracking activity' : 'inquiries matching this filter'} found.</div>`;
+    renderAdminActivityDetail(null);
+    return;
+  }
+
+  list.innerHTML = activeItems.map((item) => {
+    const itemKey = getActivityKey(item);
+    const isInquiry = item.type === 'inquiry' || item.extraData?.type === 'inquiry';
+    const secondary = isInquiry
+      ? `${item.customerName || item.userId || 'Customer'} · ${item.date || ''}`
+      : `${item.userId || 'Customer'} · ${item.date || ''}`;
+    return `<button type="button" class="admin-activity-item ${itemKey === activeKey ? 'active' : ''}" onclick="selectAdminActivity('${encodeURIComponent(itemKey)}')">
+      <span class="admin-activity-item-top"><strong>${escapeHtml(item.title || (isInquiry ? 'Customer Inquiry' : 'Tracking Event'))}</strong><span class="admin-activity-dot ${item.read ? 'read' : ''}"></span></span>
+      <small>${escapeHtml(secondary)}</small>
+      <span>${escapeHtml(String(item.message || '').slice(0, 110))}${String(item.message || '').length > 110 ? '…' : ''}</span>
+    </button>`;
+  }).join('');
+
+  renderAdminActivityDetail(activeItems.find((item) => getActivityKey(item) === activeKey));
 }
 
 async function replyToCustomerInquiry(encodedThreadKey) {
@@ -2224,7 +2384,7 @@ function renderAdminLorryBatches() {
                       <strong>${batch.batchId} — ${batch.state} ${isInstantBatch ? '• INSTANT' : '• STANDARD'}</strong>
                       <small>${batch.vehicleType} • Plate ${batch.plateNo} • Driver: ${batch.courier}</small>
                       <div class="lorry-batch-fill-bar"><div class="lorry-batch-fill-bar-inner" style="width:${fillPct}%;"></div></div>
-                      <small>${batch.stops.length} order(s) / ${batch.totalItems || 0} item(s) ${batch.vehicleCategory === 'lorry' ? '(upgraded to lorry)' : `(van limit: ${STANDARD_VAN_MAX_STOPS} orders / ${STANDARD_VAN_MAX_ITEMS} items)`} · <span style="color:${statusColor}; font-weight:bold;">${batch.status}</span></small><small style="color:var(--accent); display:block; margin-top:4px;">${liveSummary}</small>
+                      <small>${batch.stops.length} order(s) / ${batch.totalItems || 0} item(s) ${batch.vehicleCategory === 'lorry' ? '(upgraded to lorry)' : `(van limit: ${STANDARD_VAN_MAX_STOPS} orders / ${STANDARD_VAN_MAX_ITEMS} items)`} · <span style="color:${statusColor}; font-weight:bold;">${batch.status}</span></small><small style="color:var(--accent); display:block; margin-top:4px;">${liveSummary}</small><small style="color:var(--text-secondary); display:block; margin-top:4px;"><i class="fa-solid fa-circle-info"></i> Vehicle rule: ${getVehicleAssignmentExplanation(batch)}</small>
                   </div>
               </div>
               ${dispatchBtn}

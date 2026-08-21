@@ -738,7 +738,7 @@
 <!-- FIREBASE SDK & EDA WEBSOCKET SETUP -->
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
-    import { getDatabase, ref, set, onValue, get } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-database.js";
+    import { getDatabase, ref, set, onValue, get, query, orderByChild, equalTo } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-database.js";
     // NEW: Import Firebase Authentication for Real SMS
     import { getAuth, RecaptchaVerifier, signInWithPhoneNumber, signInWithEmailAndPassword, createUserWithEmailAndPassword, EmailAuthProvider, reauthenticateWithCredential, signOut } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
 
@@ -763,6 +763,9 @@
     window.dbSet = set;
     window.dbOnValue = onValue;
     window.dbGet = get;
+    window.dbQuery = query;
+    window.dbOrderByChild = orderByChild;
+    window.dbEqualTo = equalTo;
     
     // Make Auth available to script.js
     window.firebaseAuth = auth;

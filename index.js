@@ -4962,10 +4962,21 @@ function bootFirebase() {
     }
   });
 
-  window.VoidFirebaseStore.subscribe('notifications', (value) => {
-    notifications = value ? firebaseToArray(value) : [];
+  const applyCustomerNotifications = (value) => {
+    const email = String(window.firebaseAuth?.currentUser?.email || currentUser?.email || '').toLowerCase();
+    const scoped = value ? firebaseToArray(value) : [];
+    notifications = email
+      ? scoped.filter((notification) => String(notification.userId || '').toLowerCase() === email)
+      : [];
     renderNotifications();
-  });
+  };
+
+  if (typeof window.VoidFirebaseStore.subscribeUserNotifications === 'function') {
+    window.VoidFirebaseStore.subscribeUserNotifications(applyCustomerNotifications);
+  } else {
+    // Compatibility fallback for an older helper; still filter before rendering.
+    window.VoidFirebaseStore.subscribe('notifications', applyCustomerNotifications);
+  }
 
   window.VoidFirebaseStore.subscribe('hero_slides', (value) => {
     heroSlides = value
