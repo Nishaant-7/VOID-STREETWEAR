@@ -56,6 +56,7 @@ let signupChartInstance = null;
 let categoryChartInstance = null;
 let costAnalyticsChartInstance = null;
 let costAnalyticsGranularity = 'month';
+let analyticsTrendMode = 'month';
 
 let otpState = {
   prefix: null,      
@@ -654,11 +655,14 @@ function dispatchLorryBatch(batchId, options = {}) {
   batch.stops = ordered;
 
   const rand = seededRandom(batch.batchId + '-legs');
-  batch.legDurations = batch.stops.map(() => Math.floor(LORRY_LEG_MIN_SEC + rand() * (LORRY_LEG_MAX_SEC - LORRY_LEG_MIN_SEC)));
+  // Keep each dispatched leg live long enough for the map and ETA to be observed.
+  // Legacy 25–55 second legs made a van appear delivered before the admin could open tracking.
+  batch.legDurations = batch.stops.map(() => Math.floor(180 + rand() * 180));
   const vehicleLabel = getDispatchVehicleLabel(batch);
   const now = Date.now();
 
   batch.status = 'Out for Delivery';
+  batch.autoCompleteStops = false;
   batch.dispatchTime = now;
   batch.pausedElapsedSec = 0;
   batch.pausedAt = null;
@@ -707,6 +711,10 @@ function dispatchLorryBatch(batchId, options = {}) {
   syncOrderStatusViews();
   if (!options.silent) {
     alert(`${vehicleLabel} ${batch.plateNo} dispatched with ${batch.stops.length} parcel(s) to ${batch.state}.`);
+    const firstTrackableStop = batch.stops.find((stop) => stop.trackingNo);
+    if (firstTrackableStop) {
+      setTimeout(() => openTrackingView(firstTrackableStop.trackingNo, 'admin'), 350);
+    }
   }
 }
 
@@ -794,6 +802,9 @@ function checkAndProgressLorryBatches() {
     if (telemetryChanged) changedBatches.push(batch);
 
     if (batch.status !== 'Out for Delivery' || !batch.dispatchTime) return;
+    // ETA and Firebase telemetry continue updating, but delivery is an explicit
+    // admin action through NEXT STOP. This prevents instant auto-delivery.
+    if (batch.autoCompleteStops !== true) return;
 
     const progress = computeLorryProgress(batch, now);
     const elapsedSec = getBatchElapsedSeconds(batch, now);
@@ -2502,10 +2513,42 @@ async function toggleOrderStatus(orderId) {
 
 function openTrackingView(trackingNo, origin = 'customer') {
   const decodedTrackingNo = decodeURIComponent(String(trackingNo || ''));
-  const order = salesHistoryData.find((o) => String(o.trackingNo) === decodedTrackingNo) || salesHistoryData[0];
+  let order = salesHistoryData.find((o) => String(o.trackingNo) === decodedTrackingNo) || null;
+  let linkedBatch = order?.batchId
+    ? lorryBatches.find((batch) => String(batch.batchId) === String(order.batchId))
+    : lorryBatches.find((batch) => Array.isArray(batch.stops) && batch.stops.some((stop) => String(stop.trackingNo) === decodedTrackingNo));
+  const linkedStop = linkedBatch?.stops?.find((stop) => String(stop.trackingNo) === decodedTrackingNo) || null;
+
+  if (!order && linkedStop && linkedBatch) {
+    order = {
+      ...linkedStop,
+      orderId: linkedStop.orderId,
+      trackingNo: linkedStop.trackingNo,
+      batchId: linkedBatch.batchId,
+      status: linkedBatch.status === 'Delivered' ? 'Delivered' : 'Out for Delivery',
+      deliveryMethod: linkedBatch.deliveryMethod,
+      vehicleType: linkedBatch.vehicleType,
+      vehicleCategory: linkedBatch.vehicleCategory,
+      vehicleIcon: linkedBatch.vehicleIcon,
+      consumptionRate: linkedBatch.consumptionRate,
+      plateNo: linkedBatch.plateNo,
+      courier: linkedBatch.courier,
+      sender: 'VOID Central Hub, Shah Alam'
+    };
+  }
+
   if (!order) {
-    alert('No order data is available for tracking yet.');
+    alert('The selected dispatch stop is not available in Firebase yet. Refresh the Lorry Batches data and try again.');
     return;
+  }
+
+  // A live batch is authoritative only when this selected stop is not already delivered.
+  const selectedStopDelivered = String(linkedStop?.status || '').toLowerCase() === 'delivered';
+  if (linkedBatch && ['Out for Delivery', 'Paused'].includes(linkedBatch.status) && order.status === 'Delivered' && !selectedStopDelivered) {
+    order = { ...order, status: 'Out for Delivery', eta: linkedBatch.liveTelemetry?.remainingSec ? formatLiveEta(linkedBatch.liveTelemetry.remainingSec) : 'En Route' };
+  }
+  if (linkedBatch && String(linkedBatch.status || '').toLowerCase() === 'delivered' && order.status !== 'Delivered') {
+    order = { ...order, status: 'Delivered', eta: 'Delivered' };
   }
 
   if (order.status !== 'Out for Delivery' && order.status !== 'Delivered') {
@@ -3580,20 +3623,28 @@ function updateLiveTrackingReadout(batch, order) {
   const stop = batch && order ? batch.stops.find((item) => item.orderId === order.orderId) : null;
   const etaEl = document.getElementById('track-eta');
   const descEl = document.getElementById('track-status-desc');
+  const selectedStopDelivered = String(stop?.status || '').toLowerCase() === 'delivered'
+    || normalizeOrderStatus(order?.status) === 'Delivered';
+  const batchDelivered = String(batch?.status || '').toLowerCase() === 'delivered'
+    || String(batch?.driverState || '').toLowerCase() === 'completed';
   if (etaEl) {
-    etaEl.innerText = batch && batch.status === 'Delivered'
+    etaEl.innerText = selectedStopDelivered || batchDelivered
       ? 'DELIVERED'
       : batch && batch.status === 'Paused'
         ? `PAUSED · ${formatLiveEta(telemetry.remainingSec)}`
-        : `STOP ${stop && stop.sequence ? stop.sequence : telemetry.currentStopSequence || '—'} · ${formatLiveEta(telemetry.remainingSec)}`;
+        : Number(telemetry.remainingSec) <= 0
+          ? `STOP ${stop && stop.sequence ? stop.sequence : telemetry.currentStopSequence || '—'} · ARRIVED AT STOP`
+          : `STOP ${stop && stop.sequence ? stop.sequence : telemetry.currentStopSequence || '—'} · ${formatLiveEta(telemetry.remainingSec)}`;
   }
   if (descEl && batch) {
     const updated = telemetry.lastUpdatedAt ? new Date(telemetry.lastUpdatedAt).toLocaleTimeString('en-MY') : 'waiting for update';
-    descEl.innerText = batch.status === 'Paused'
-      ? `Driver paused at the last Firebase location. Last update ${updated}.`
-      : batch.status === 'Delivered'
-        ? `All stops completed. Last Firebase update ${updated}.`
-        : `Live Firebase location updated ${updated}. ${telemetry.completedStops || 0}/${telemetry.totalStops || batch.stops.length} stops completed.`;
+    descEl.innerText = selectedStopDelivered || batchDelivered
+      ? `This stop is delivered. Last Firebase update ${updated}.`
+      : batch.status === 'Paused'
+        ? `Driver paused at the last Firebase location. Last update ${updated}.`
+        : Number(telemetry.remainingSec) <= 0
+          ? `Vehicle arrived at this stop. Use NEXT STOP to confirm delivery. Last Firebase update ${updated}.`
+          : `Live Firebase location updated ${updated}. ${telemetry.completedStops || 0}/${telemetry.totalStops || batch.stops.length} stops completed.`;
   }
 }
 
@@ -4194,6 +4245,19 @@ function parseAnalyticsDate(value) {
   }
   const raw = String(value || '').trim();
   if (!raw) return null;
+
+  // Firebase legacy records may use Malaysia locale format: 21/08/2026, 11:20 AM.
+  const dmy = raw.match(/^(\d{1,2})[\\/.-](\d{1,2})[\\/.-](\d{4})(?:,?\s+(\d{1,2}):(\d{2})(?:\s*(AM|PM))?)?/i);
+  if (dmy) {
+    let hour = Number(dmy[4] || 0);
+    const minute = Number(dmy[5] || 0);
+    const meridiem = String(dmy[6] || '').toUpperCase();
+    if (meridiem === 'PM' && hour < 12) hour += 12;
+    if (meridiem === 'AM' && hour === 12) hour = 0;
+    const localDate = new Date(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]), hour, minute);
+    if (!Number.isNaN(localDate.getTime())) return localDate;
+  }
+
   const parsed = new Date(raw);
   if (!Number.isNaN(parsed.getTime())) return parsed;
   const match = raw.match(/([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})/);
@@ -4203,7 +4267,7 @@ function parseAnalyticsDate(value) {
 }
 
 function analyticsOrderDate(order) {
-  return parseAnalyticsDate(order?.createdAt || order?.date || order?.orderDate);
+  return parseAnalyticsDate(order?.createdAt || order?.timestamp || order?.date || order?.orderDate || order?.createdDate);
 }
 
 function analyticsOrderAmount(order) {
@@ -4215,18 +4279,66 @@ function analyticsIsRevenueOrder(order) {
   return !['cancelled', 'canceled', 'refunded', 'failed'].includes(String(order?.status || '').toLowerCase());
 }
 
-function createAnalyticsMonthSeries() {
+function analyticsLocalKey(date, mode) {
+  if (mode === 'day') {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  }
+  if (mode === 'year') return String(date.getFullYear());
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function createAnalyticsTrendSeries(mode = analyticsTrendMode) {
   const now = new Date();
+  if (mode === 'day') {
+    return Array.from({ length: 30 }, (_, index) => {
+      const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29 + index);
+      return {
+        key: analyticsLocalKey(date, mode),
+        label: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        revenue: 0,
+        orders: 0,
+        signups: 0
+      };
+    });
+  }
+  if (mode === 'year') {
+    return Array.from({ length: 5 }, (_, index) => {
+      const year = now.getFullYear() - 4 + index;
+      const date = new Date(year, 0, 1);
+      return {
+        key: analyticsLocalKey(date, mode),
+        label: String(year),
+        revenue: 0,
+        orders: 0,
+        signups: 0
+      };
+    });
+  }
   return Array.from({ length: 12 }, (_, index) => {
     const date = new Date(now.getFullYear(), now.getMonth() - 11 + index, 1);
     return {
-      key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
+      key: analyticsLocalKey(date, mode),
       label: date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
       revenue: 0,
       orders: 0,
       signups: 0
     };
   });
+}
+
+function createAnalyticsMonthSeries() {
+  return createAnalyticsTrendSeries('month');
+}
+
+function setAnalyticsTrendMode(mode) {
+  const allowed = ['day', 'month', 'year'];
+  analyticsTrendMode = allowed.includes(mode) ? mode : 'month';
+  document.querySelectorAll('[data-analytics-trend-mode]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.analyticsTrendMode === analyticsTrendMode);
+  });
+  const caption = document.getElementById('analytics-trend-caption');
+  if (caption) caption.innerText = analyticsTrendMode === 'day' ? 'LAST 30 DAYS' : analyticsTrendMode === 'year' ? 'LAST 5 YEARS' : 'LAST 12 MONTHS';
+  scheduleAnalyticsRefresh();
 }
 
 function getAnalyticsCategoryForName(name) {
@@ -4306,12 +4418,12 @@ function initAdminCharts() {
   const salesCtx = document.getElementById('salesChart');
   const signupCtx = document.getElementById('signupChart');
   const categoryCtx = document.getElementById('categoryChart');
-  const monthSeries = createAnalyticsMonthSeries();
+  const monthSeries = createAnalyticsTrendSeries(analyticsTrendMode);
 
   salesHistoryData.filter(analyticsIsRevenueOrder).forEach((order) => {
     const date = analyticsOrderDate(order);
     if (!date) return;
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const key = analyticsLocalKey(date, analyticsTrendMode);
     const bucket = monthSeries.find((item) => item.key === key);
     if (bucket) {
       bucket.revenue += analyticsOrderAmount(order);
@@ -4322,7 +4434,7 @@ function initAdminCharts() {
   getRegisteredUsersList().forEach((user) => {
     const date = parseAnalyticsDate(user?.createdAt || user?.createdDate || user?.registeredAt);
     if (!date) return;
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const key = analyticsLocalKey(date, analyticsTrendMode);
     const bucket = monthSeries.find((item) => item.key === key);
     if (bucket) bucket.signups += 1;
   });
@@ -4499,6 +4611,8 @@ function bootFirebase() {
     } else {
       salesHistoryData = [];
       adminSalesLoaded = true;
+      renderAdminSalesHistory();
+      scheduleAnalyticsRefresh();
     }
   });
 

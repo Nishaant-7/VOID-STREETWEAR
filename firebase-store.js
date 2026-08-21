@@ -85,10 +85,12 @@
       const currentStatus = String(current?.status || '').toLowerCase();
       const recordIsFinal = ['delivered', 'completed'].includes(recordStatus);
       const currentIsFinal = ['delivered', 'completed'].includes(currentStatus);
+      // Timestamp is authoritative. A legacy Delivered duplicate must not hide a
+      // newer Pending/Out for Delivery record. Batch linkage only breaks ties.
       const shouldReplace = !current
-        || (recordHasBatch && !currentHasBatch)
-        || (recordIsFinal && !currentIsFinal)
-        || (recordTime > currentTime && !(currentIsFinal && !recordIsFinal));
+        || recordTime > currentTime
+        || (recordTime === currentTime && recordHasBatch && !currentHasBatch)
+        || (recordTime === currentTime && recordIsFinal && !currentIsFinal);
       if (shouldReplace) latestByOrderId.set(orderId, record);
     });
     return Array.from(latestByOrderId.values());
@@ -275,15 +277,26 @@
   }
 
   function subscribe(path, callback) {
-    const attach = () => {
+    const protectedPath = ['users', 'sales_history', 'lorry_batches', 'notifications', 'otp_logs'].includes(String(path));
+    const attach = async () => {
       if (!firebaseReady()) {
         setTimeout(attach, 200);
         return;
       }
+      if (protectedPath && !authReady()) {
+        await waitForAuth(10000);
+        if (!authReady()) {
+          setTimeout(attach, 500);
+          return;
+        }
+      }
       window.dbOnValue(
         window.dbRef(window.firebaseDb, path),
         (snapshot) => callback(snapshot.exists() ? snapshot.val() : null, snapshot),
-        (error) => console.error(`Firebase subscription failed at /${path}:`, error)
+        (error) => {
+          console.error(`Firebase subscription failed at /${path}:`, error);
+          if (protectedPath) setTimeout(attach, 1000);
+        }
       );
     };
     attach();

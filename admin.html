@@ -148,13 +148,28 @@
                     
                     <div class="charts-grid">
                         <div class="chart-container">
-                            <h3 style="margin-bottom: 1rem; font-family: var(--font-heading);">SALES TREND (REVENUE)</h3>
+                            <div class="analytics-chart-heading">
+                                <div>
+                                    <h3 style="margin-bottom: 0.25rem; font-family: var(--font-heading);">SALES TREND (REVENUE)</h3>
+                                    <small id="analytics-trend-caption" class="analytics-trend-caption">LAST 12 MONTHS</small>
+                                </div>
+                                <div class="analytics-trend-toggle" role="group" aria-label="Analytics period">
+                                    <button type="button" class="analytics-trend-btn" data-analytics-trend-mode="day" onclick="setAnalyticsTrendMode('day')">DAY</button>
+                                    <button type="button" class="analytics-trend-btn active" data-analytics-trend-mode="month" onclick="setAnalyticsTrendMode('month')">MONTH</button>
+                                    <button type="button" class="analytics-trend-btn" data-analytics-trend-mode="year" onclick="setAnalyticsTrendMode('year')">YEAR</button>
+                                </div>
+                            </div>
                             <div class="chart-canvas-wrap">
                                 <canvas id="salesChart"></canvas>
                             </div>
                         </div>
                         <div class="chart-container">
-                            <h3 style="margin-bottom: 1rem; font-family: var(--font-heading);">NEW USERS</h3>
+                            <div class="analytics-chart-heading">
+                                <div>
+                                    <h3 style="margin-bottom: 0.25rem; font-family: var(--font-heading);">NEW USERS</h3>
+                                    <small class="analytics-trend-caption">SAME SELECTED PERIOD</small>
+                                </div>
+                            </div>
                             <div class="chart-canvas-wrap">
                                 <canvas id="signupChart"></canvas>
                             </div>

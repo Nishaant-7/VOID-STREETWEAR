@@ -216,10 +216,48 @@
 
 
                 <div class="signup-agreement-row">
-                    <input type="checkbox" id="reg-agreement" name="agreement" required>
-                    <label for="reg-agreement">I agree to the VOID Terms of Use, Privacy Policy, and Firebase data-processing notice for account and delivery services.</label>
+                    <input type="checkbox" id="reg-agreement" name="agreement" required disabled>
+                    <label for="reg-agreement">I agree to the <a href="#agreement-modal" onclick="openAgreementModal(event)">VOID Terms of Use, Privacy Policy, and Firebase data-processing notice</a> for account and delivery services.</label>
                 </div>
                 <div id="reg-agreement-status" class="signup-agreement-status" aria-live="polite"></div>
+                <div class="agreement-read-actions">
+                    <button type="button" class="agreement-open-link" onclick="openAgreementModal(event)"><i class="fa-solid fa-file-contract"></i> READ FULL TERMS & PRIVACY AGREEMENT</button>
+                </div>
+
+                <div id="agreement-modal" class="agreement-modal" hidden role="dialog" aria-modal="true" aria-labelledby="agreement-modal-title">
+                    <div class="agreement-modal-card">
+                        <div class="agreement-modal-header">
+                            <div>
+                                <span class="agreement-eyebrow">VOID CUSTOMER AGREEMENT</span>
+                                <h3 id="agreement-modal-title">TERMS OF USE & PRIVACY POLICY</h3>
+                            </div>
+                            <button type="button" class="agreement-close-x" onclick="closeAgreementModal()" aria-label="Close agreement">&times;</button>
+                        </div>
+                        <div id="agreement-document" class="agreement-document" tabindex="0" onscroll="handleAgreementDocumentScroll(event)">
+                            <p class="agreement-intro"><strong>Please read this complete agreement.</strong> The acceptance checkbox becomes available only after you reach the end of this document.</p>
+                            <h4>1. TERMS OF USE</h4>
+                            <p>VOID provides a streetwear storefront and delivery coordination service. By creating an account, you confirm that the information you provide is accurate, that you are authorized to use the account, and that you will use the service lawfully.</p>
+                            <p>You are responsible for protecting your sign-in credentials and for activity performed through your account. You must not attempt to access another customer’s account, interfere with delivery operations, misuse the tracking system, or submit false delivery information.</p>
+                            <p>Orders are subject to product availability, address verification, delivery coverage, and successful account verification. Delivery estimates are approximate operational estimates and may change because of route conditions, traffic, weather, vehicle availability, or other logistics events.</p>
+                            <h4>2. ORDERS, DELIVERY & ACCOUNT DATA</h4>
+                            <p>VOID stores order, delivery, notification, and dispatch information in Firebase Realtime Database so that customers and administrators can view the status of an order. Customers may view only the records associated with their own authenticated account. Administrators may process orders, manage dispatch batches, and respond to customer inquiries for service operations.</p>
+                            <p>You agree to provide a valid email address, phone number, shipping address, and location information when requested. You may update inaccurate profile information through the account tools. VOID may suspend an account where activity creates a security, fraud, or service risk.</p>
+                            <h4>3. PRIVACY POLICY</h4>
+                            <p>VOID uses the information supplied during registration and checkout to authenticate accounts, verify contact details, calculate delivery routes, process order fulfillment, provide notifications, answer inquiries, and maintain operational analytics.</p>
+                            <p>Information is shared only with the services required to operate the platform, such as Firebase Authentication, Firebase Realtime Database, map and routing providers, traffic or weather services, and email verification services. VOID does not intentionally store CVV or payment-card security data in the customer profile.</p>
+                            <p>Security controls are applied to restrict customer records to the authenticated account and to restrict administrative functions to authorized administrator accounts. No internet transmission or storage system can be guaranteed to be completely risk-free, so you should use a strong password and report suspected unauthorized activity promptly.</p>
+                            <h4>4. NOTIFICATIONS, TRACKING & INQUIRIES</h4>
+                            <p>By accepting this agreement, you consent to receive account, order, delivery, tracking, and inquiry-related notifications at the contact details you provide. Tracking locations and estimated arrival times are operational estimates and may not represent a continuously precise physical location.</p>
+                            <h4>5. ACCEPTANCE</h4>
+                            <p>When you tick the checkbox and submit the signup form, VOID records your acceptance and the acceptance timestamp with your Firebase customer profile. You may stop the signup process instead of accepting this agreement. If this agreement changes materially, VOID may require acceptance of the updated version before continued use of affected services.</p>
+                            <p class="agreement-final-note"><strong>End of agreement.</strong> You may now close this window and enable the acceptance checkbox.</p>
+                        </div>
+                        <div class="agreement-modal-footer">
+                            <span id="agreement-scroll-hint">Scroll to the bottom to enable acceptance.</span>
+                            <button type="button" id="agreement-close-button" class="btn-full agreement-close-button" onclick="closeAgreementModal()" disabled>AGREEMENT READ — CLOSE</button>
+                        </div>
+                    </div>
+                </div>
 
                 <div id="signup-recaptcha-container" class="recaptcha-wrap"></div>
                 <div id="firebase-recaptcha-container"></div>

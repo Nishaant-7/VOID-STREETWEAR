@@ -30,6 +30,10 @@ async function loadUsersFromFirebase() {
 
 let currentUser = getSessionUser();
 let cart = [];
+let agreementReadState = {
+  completed: false,
+  opened: false
+};
 
 // ==========================================
 // SECURITY: SHA-256 PASSWORD HASHING
@@ -336,7 +340,19 @@ let salesHistoryData = [
 // CORE FIREBASE SYNC FUNCTIONS
 function saveSalesHistory() {
   return writeFirebase('sales_history', salesHistoryData)
-    .catch((error) => console.error('Cloud Sync Error (Sales):', error));
+    .catch((error) => {
+      console.error('Cloud Sync Error (Sales):', error);
+      return null;
+    });
+}
+
+async function persistSalesHistoryOrAlert() {
+  const saved = await saveSalesHistory();
+  if (saved === null) {
+    alert('Your order could not be synchronized to Firebase. Please sign in again and retry before leaving checkout.');
+    return false;
+  }
+  return true;
 }
 
 function saveProductsToCloud() {
@@ -542,7 +558,7 @@ function computeNearestNeighborOrder(stops) {
   return ordered;
 }
 
-function dispatchLorryBatch(batchId) {
+function dispatchLorryBatch(batchId, options = {}) {
   const batch = lorryBatches.find((item) => item.batchId === batchId);
   if (!batch || batch.status !== 'Forming') return;
   if (!Array.isArray(batch.stops) || batch.stops.length === 0) {
@@ -559,11 +575,13 @@ function dispatchLorryBatch(batchId) {
   batch.stops = ordered;
 
   const rand = seededRandom(batch.batchId + '-legs');
-  batch.legDurations = batch.stops.map(() => Math.floor(LORRY_LEG_MIN_SEC + rand() * (LORRY_LEG_MAX_SEC - LORRY_LEG_MIN_SEC)));
+  // Keep each dispatched leg live long enough for the map and ETA to be observed.
+  batch.legDurations = batch.stops.map(() => Math.floor(180 + rand() * 180));
   const vehicleLabel = batch.vehicleCategory === 'van' ? 'Van' : 'Lorry';
   const now = Date.now();
 
   batch.status = 'Out for Delivery';
+  batch.autoCompleteStops = false;
   batch.dispatchTime = now;
   batch.pausedElapsedSec = 0;
   batch.pausedAt = null;
@@ -610,7 +628,13 @@ function dispatchLorryBatch(batchId) {
   saveSalesHistory();
   if (typeof renderAdminLorryBatches === 'function') renderAdminLorryBatches();
   syncOrderStatusViews();
-  alert(`${vehicleLabel} ${batch.plateNo} dispatched with ${batch.stops.length} parcel(s) to ${batch.state}.`);
+  if (!options.silent) {
+    alert(`${vehicleLabel} ${batch.plateNo} dispatched with ${batch.stops.length} parcel(s) to ${batch.state}.`);
+    const firstTrackableStop = batch.stops.find((stop) => stop.trackingNo);
+    if (firstTrackableStop && typeof openTrackingView === 'function') {
+      setTimeout(() => openTrackingView(firstTrackableStop.trackingNo, 'admin'), 350);
+    }
+  }
 }
 
 function pauseLorryBatch(batchId) {
@@ -697,6 +721,7 @@ function checkAndProgressLorryBatches() {
     if (telemetryChanged) changedBatches.push(batch);
 
     if (batch.status !== 'Out for Delivery' || !batch.dispatchTime) return;
+    if (batch.autoCompleteStops !== true) return;
 
     const progress = computeLorryProgress(batch, now);
     const elapsedSec = getBatchElapsedSeconds(batch, now);
@@ -2502,6 +2527,19 @@ async function resolveDeliveryCoords(prefix, street, city, state, zip) {
 async function processPayment(e) {
   e.preventDefault();
 
+  if (window.VoidFirebaseStore?.waitForAuth) {
+    const authReady = await window.VoidFirebaseStore.waitForAuth(10000);
+    if (!authReady) {
+      alert('Your Firebase login session is not ready. Please sign in again before placing the order.');
+      return;
+    }
+  }
+  const activeAuthUser = window.VoidFirebaseStore?.currentAuthUser?.() || window.firebaseAuth?.currentUser;
+  if (!activeAuthUser?.uid) {
+    alert('Your customer login session has expired. Please sign in again before placing the order.');
+    return;
+  }
+
   const chkName = document.getElementById('chk-name').value;
   const chkAddress = document.getElementById('chk-address').value;
   const chkCity = document.getElementById('chk-city').value;
@@ -2549,8 +2587,8 @@ async function processPayment(e) {
   let newOrder = {
     orderId: 'ORD-' + Math.floor(1000 + Math.random() * 9000),
     customerName: chkName,
-    customerEmail: currentUser ? currentUser.email : '',
-    customerUid: currentUser?.uid || window.VoidFirebaseStore?.currentAuthUser()?.uid || null,
+    customerEmail: String(activeAuthUser.email || currentUser?.email || '').trim().toLowerCase(),
+    customerUid: activeAuthUser.uid,
     trackingNo: null, 
     address: `${chkAddress}, ${chkZip} ${chkCity}, ${chkState}`,
     state: chkState,
@@ -2589,7 +2627,7 @@ async function processPayment(e) {
 
     salesHistoryData.unshift(newOrder);
     const batch = assignOrderToLorryBatch(newOrder);
-    saveSalesHistory();
+    if (!(await persistSalesHistoryOrAlert())) return;
 
     const batchVehicleLabel = batch.vehicleCategory === 'lorry' ? 'lorry' : 'van';
     const batchFillText = `${batch.stops.length} order(s) / ${batch.totalItems} item(s)`;
@@ -2635,7 +2673,7 @@ async function processPayment(e) {
 
     salesHistoryData.unshift(newOrder);
     const batch = assignOrderToLorryBatch(newOrder);
-    saveSalesHistory();
+    if (!(await persistSalesHistoryOrAlert())) return;
 
     const batchFillText = `${batch.stops.length} order(s) / ${batch.totalItems} item(s)`;
     confirmationMsg = `Payment successful! Your Instant Delivery order has been added to express dispatch batch ${batch.batchId} for ${chkState} (${batchFillText}). An admin must dispatch the batch from Admin → Lorry Batches. ${shippingFeeNote}`;
@@ -3036,6 +3074,70 @@ function attachVerifyResetListener(prefix, channel) {
   });
 }
 
+function updateAgreementGateStatus(message, isSuccess = false) {
+  const status = document.getElementById('reg-agreement-status');
+  if (!status) return;
+  status.innerText = message;
+  status.style.color = isSuccess ? 'var(--success)' : 'var(--danger)';
+}
+
+function openAgreementModal(event) {
+  if (event) event.preventDefault();
+  const modal = document.getElementById('agreement-modal');
+  const documentPanel = document.getElementById('agreement-document');
+  if (!modal || !documentPanel) return;
+  agreementReadState.opened = true;
+  documentPanel.scrollTop = 0;
+  modal.removeAttribute('hidden');
+  modal.classList.add('active');
+  updateAgreementGateStatus('Please open and read the complete agreement, then scroll to the bottom to enable the checkbox.');
+  window.setTimeout(() => documentPanel.focus(), 50);
+}
+
+function closeAgreementModal() {
+  const modal = document.getElementById('agreement-modal');
+  if (!modal) return;
+  if (!agreementReadState.completed) {
+    updateAgreementGateStatus('Please scroll to the end of the complete agreement before closing it.');
+    return;
+  }
+  modal.classList.remove('active');
+  modal.setAttribute('hidden', 'hidden');
+}
+
+function handleAgreementDocumentScroll(event) {
+  const panel = event.currentTarget;
+  const reachedEnd = panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 12;
+  if (!reachedEnd || agreementReadState.completed) return;
+  agreementReadState.completed = true;
+  const checkbox = document.getElementById('reg-agreement');
+  if (checkbox) checkbox.disabled = false;
+  updateAgreementGateStatus('✓ Agreement read. You may now tick the acceptance checkbox.', true);
+  const closeButton = document.getElementById('agreement-close-button');
+  if (closeButton) closeButton.disabled = false;
+}
+
+function setupAgreementGate() {
+  const checkbox = document.getElementById('reg-agreement');
+  const documentPanel = document.getElementById('agreement-document');
+  const closeButton = document.getElementById('agreement-close-button');
+  if (!checkbox || !documentPanel) return;
+  agreementReadState = { completed: false, opened: false };
+  checkbox.checked = false;
+  checkbox.disabled = true;
+  documentPanel.addEventListener('scroll', handleAgreementDocumentScroll, { passive: true });
+  checkbox.addEventListener('change', () => {
+    if (!agreementReadState.completed) {
+      checkbox.checked = false;
+      updateAgreementGateStatus('Open and scroll through the complete agreement before accepting it.');
+      return;
+    }
+    updateAgreementGateStatus(checkbox.checked ? '✓ AGREEMENT ACCEPTED' : 'Agreement is required before account creation.', checkbox.checked);
+  });
+  if (closeButton) closeButton.disabled = true;
+  updateAgreementGateStatus('Open the Terms and Privacy Agreement and scroll to the end before ticking the checkbox.');
+}
+
 async function handleSignup(e) {
   e.preventDefault();
 
@@ -3053,7 +3155,13 @@ async function handleSignup(e) {
     const zip = document.getElementById('reg-zip') ? document.getElementById('reg-zip').value : '40470';
     const agreementCheckbox = document.getElementById('reg-agreement');
 
-    if (!agreementCheckbox || !agreementCheckbox.checked) {
+    if (!agreementReadState.completed) {
+      alert('Please open and read the complete VOID Terms and Privacy Agreement to the end before continuing.');
+      openAgreementModal();
+      return;
+    }
+
+    if (!agreementCheckbox || agreementCheckbox.disabled || !agreementCheckbox.checked) {
       alert('Please tick the agreement checkbox to accept the VOID Terms, Privacy Policy, and Firebase data-processing notice before creating your account.');
       agreementCheckbox?.focus();
       if (typeof grecaptcha !== 'undefined' && signupRecaptchaId !== null) grecaptcha.reset(signupRecaptchaId);
@@ -3365,9 +3473,13 @@ function renderMyOrders() {
 
   const statusFilter = document.getElementById('my-orders-status-filter')?.value || 'all';
 
-  let myOrders = salesHistoryData.filter(
-    (o) => (o.customerEmail || '').toLowerCase() === currentUser.email.toLowerCase()
-  );
+  const authUid = currentUser.uid || window.VoidFirebaseStore?.currentAuthUser()?.uid || '';
+  const accountEmail = String(currentUser.email || window.VoidFirebaseStore?.currentAuthUser()?.email || '').trim().toLowerCase();
+  let myOrders = salesHistoryData.filter((o) => {
+    const orderUid = String(o.customerUid || '').trim();
+    const orderEmail = String(o.customerEmail || '').trim().toLowerCase();
+    return (authUid && orderUid === authUid) || (!!accountEmail && orderEmail === accountEmail);
+  });
 
   if (statusFilter !== 'all') {
     myOrders = myOrders.filter((o) => o.status === statusFilter);
@@ -3505,9 +3617,27 @@ function logout() {
 }
 
 function openTrackingView(trackingNo, origin = 'customer') {
-  const order = salesHistoryData.find((o) => o.trackingNo === trackingNo) || salesHistoryData[0];
+  const decodedTrackingNo = decodeURIComponent(String(trackingNo || ''));
+  let order = salesHistoryData.find((o) => String(o.trackingNo) === decodedTrackingNo) || null;
+  const linkedBatch = lorryBatches.find((batch) => Array.isArray(batch.stops)
+    && batch.stops.some((stop) => String(stop.trackingNo) === decodedTrackingNo));
+  const linkedStop = linkedBatch?.stops?.find((stop) => String(stop.trackingNo) === decodedTrackingNo) || null;
+  if (!order && linkedStop && linkedBatch) {
+    order = {
+      ...linkedStop,
+      orderId: linkedStop.orderId,
+      trackingNo: linkedStop.trackingNo,
+      batchId: linkedBatch.batchId,
+      status: linkedBatch.status === 'Delivered' ? 'Delivered' : 'Out for Delivery',
+      vehicleType: linkedBatch.vehicleType,
+      vehicleCategory: linkedBatch.vehicleCategory,
+      plateNo: linkedBatch.plateNo,
+      courier: linkedBatch.courier,
+      sender: 'VOID Central Hub, Shah Alam'
+    };
+  }
   if (!order) {
-    alert('No order data is available for tracking yet.');
+    alert('The selected tracking record is not available in Firebase yet. Please refresh and try again.');
     return;
   }
 
@@ -4989,16 +5119,7 @@ function bootFirebase() {
 function setupIndexEventListeners() {
   ['reg', 'chk', 'edit'].forEach(setupAddressAutocompleteInputs);
 
-  const agreementCheckbox = document.getElementById('reg-agreement');
-  const agreementStatus = document.getElementById('reg-agreement-status');
-  if (agreementCheckbox && agreementStatus) {
-    const updateAgreementStatus = () => {
-      agreementStatus.innerText = agreementCheckbox.checked ? '✓ AGREEMENT ACCEPTED' : 'Agreement is required before account creation.';
-      agreementStatus.style.color = agreementCheckbox.checked ? 'var(--success)' : 'var(--danger)';
-    };
-    agreementCheckbox.addEventListener('change', updateAgreementStatus);
-    updateAgreementStatus();
-  }
+  setupAgreementGate();
   attachVerifyResetListener('reg', 'email');
   attachVerifyResetListener('reg', 'phone');
   attachVerifyResetListener('edit', 'email');
