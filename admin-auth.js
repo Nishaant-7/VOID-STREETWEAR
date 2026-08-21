@@ -15,6 +15,27 @@ async function readAdminProfile(uid) {
   return window.VoidFirebaseStore.read(`users/${uid}`, null);
 }
 
+async function findLegacyAdminProfileByEmail(email) {
+  if (!window.VoidFirebaseStore || !email) return null;
+  const users = await window.VoidFirebaseStore.read('users', {});
+  const wantedEmail = String(email).trim().toLowerCase();
+  const matches = Object.entries(users || {})
+    .filter(([, record]) => {
+      if (!record || typeof record !== 'object') return false;
+      return String(record.email || '').trim().toLowerCase() === wantedEmail
+        && String(record.role || '').toLowerCase() === 'admin';
+    })
+    .sort(([keyA], [keyB]) => {
+      const numericA = /^\d+$/.test(keyA) ? Number(keyA) : Number.MAX_SAFE_INTEGER;
+      const numericB = /^\d+$/.test(keyB) ? Number(keyB) : Number.MAX_SAFE_INTEGER;
+      return numericA - numericB;
+    });
+
+  if (!matches.length) return null;
+  const [legacyKey, legacyProfile] = matches[0];
+  return { legacyKey, legacyProfile };
+}
+
 async function writeAdminProfile(profile) {
   if (!window.VoidFirebaseStore || !profile || !profile.uid) {
     throw new Error('Firebase store helper or administrator UID is unavailable.');
@@ -95,22 +116,34 @@ async function handleAdminLogin(event) {
     const profile = await readAdminProfile(authUser.uid);
 
     const isBootstrap = email === ADMIN_BOOTSTRAP_EMAIL;
-    const adminProfile = profile || (isBootstrap
+    const legacyMatch = !profile && isBootstrap
+      ? await findLegacyAdminProfileByEmail(email)
+      : null;
+    const adminProfile = profile || (legacyMatch
       ? {
+          ...legacyMatch.legacyProfile,
           uid: authUser.uid,
-          name: 'System Admin',
-          username: 'admin',
+          legacyUserKey: legacyMatch.legacyKey,
           email,
-          phone: '0123456789',
-          address: 'VOID HQ, Seksyen 7',
-          city: 'Shah Alam',
-          state: 'Selangor',
-          zip: '40000',
           role: 'admin',
-          blocked: false,
-          createdAt: new Date().toISOString()
+          blocked: false
         }
-      : null);
+      : (isBootstrap
+        ? {
+            uid: authUser.uid,
+            name: 'System Admin',
+            username: 'admin',
+            email,
+            phone: '0123456789',
+            address: 'VOID HQ, Seksyen 7',
+            city: 'Shah Alam',
+            state: 'Selangor',
+            zip: '40000',
+            role: 'admin',
+            blocked: false,
+            createdAt: new Date().toISOString()
+          }
+        : null));
 
     if (!adminProfile || adminProfile.role !== 'admin') {
       if (typeof window.signOut === 'function') {
@@ -136,7 +169,17 @@ async function handleAdminLogin(event) {
     window.location.replace('admin.html');
   } catch (error) {
     console.error('Firebase administrator login failed:', error);
-    alert('Invalid administrator email/password or Firebase Authentication is not configured for this account.');
+    const code = String(error?.code || 'unknown');
+    const detail = code === 'auth/email-already-in-use'
+      ? 'This email already exists in Firebase Authentication. Use its Firebase password or reset it in Authentication → Users.'
+      : code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found'
+        ? 'Firebase rejected the email or password. Check Authentication → Users and reset the password if needed.'
+        : code === 'auth/operation-not-allowed'
+          ? 'Firebase Email/Password provider is disabled. Enable it in Authentication → Sign-in method.'
+          : code === 'auth/network-request-failed'
+            ? 'The browser could not reach Firebase. Check the internet connection and try again.'
+            : error?.message || 'Firebase Authentication is not configured for this account.';
+    alert(`Administrator login failed (${code}). ${detail}`);
   } finally {
     if (typeof grecaptcha !== 'undefined' && adminRecaptchaId !== null) {
       grecaptcha.reset(adminRecaptchaId);

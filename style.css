@@ -392,6 +392,28 @@ select { appearance: auto; }
 .overlay.active { display: block; }
 
 /* Admin dashboard */
+.admin-inquiry-card { margin-top: 0.75rem; padding: 0.9rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-secondary); }
+.admin-inquiry-card-header { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; }
+.admin-inquiry-card-header strong, .admin-inquiry-card-header small { display: block; }
+.admin-inquiry-card-header small, .admin-inquiry-card small { margin-top: 0.25rem; color: var(--text-secondary); }
+.admin-inquiry-message, .admin-inquiry-reply p { color: var(--text-primary); line-height: 1.5; white-space: pre-wrap; }
+.admin-inquiry-reply { margin: 0.7rem 0; padding: 0.5rem 0.7rem; border-left: 2px solid var(--accent); background: rgba(129, 140, 248, 0.06); }
+.admin-inquiry-reply-form { display: flex; gap: 0.6rem; align-items: flex-end; }
+.admin-inquiry-reply-form textarea { flex: 1; min-height: 54px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 5px; padding: 0.6rem; resize: vertical; }
+.admin-inquiry-empty { padding: 0.8rem; border: 1px dashed var(--border); border-radius: 6px; color: var(--text-secondary); }
+.transport-detail-link { border: 0; background: transparent; color: var(--accent); cursor: pointer; font: inherit; text-align: left; }
+.transport-detail-link:hover { text-decoration: underline; }
+.transport-detail-item { display: flex; justify-content: space-between; gap: 1rem; padding: 0.8rem 0; border-bottom: 1px solid var(--border); }
+.transport-detail-item strong, .transport-detail-item small { display: block; }
+.transport-detail-item small { margin-top: 0.25rem; color: var(--text-secondary); }
+.transport-detail-actions { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+.notif-replies { margin-top: 1rem; }
+.notif-replies h4 { margin: 0 0 0.5rem; color: var(--accent-bright); font-family: var(--font-heading); font-size: 0.72rem; }
+.notif-reply { margin-top: 0.55rem; padding: 0.6rem 0.7rem; border-left: 2px solid var(--accent); background: rgba(129, 140, 248, 0.06); }
+.notif-reply strong, .notif-reply small { display: block; }
+.notif-reply small { margin-top: 0.2rem; color: var(--text-secondary); }
+.notif-reply p { margin: 0.35rem 0 0; white-space: pre-wrap; }
+
 .admin-layout { display: flex; width: min(1600px, calc(100% - 2.5rem)); min-height: calc(100vh - 76px); margin: 0 auto; padding: 2rem 0 4rem; gap: 2rem; }
 .admin-sidebar { flex: 0 0 220px; align-self: flex-start; position: sticky; top: 100px; padding: 1.1rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-secondary); }
 .admin-sidebar h2 { margin: 0 0 1rem; color: var(--accent-bright); font-family: var(--font-heading); font-size: 1rem; }

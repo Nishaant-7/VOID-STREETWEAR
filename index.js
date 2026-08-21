@@ -357,7 +357,10 @@ function saveUsersToCloud(usersArray) {
 
 function saveNotificationsToCloud() {
   return writeFirebase('notifications', notifications)
-    .catch((error) => console.error('Cloud Sync Error (Notifications):', error));
+    .catch((error) => {
+      console.error('Cloud Sync Error (Notifications):', error);
+      return null;
+    });
 }
 
 function syncOrderStatusViews() {
@@ -917,6 +920,13 @@ function firebaseToArray(data) {
   if (Array.isArray(data)) return data.filter(Boolean);
   return Object.values(data).filter(Boolean);
 }
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[char]));
+}
+
 function validateRealAddress(addressData) {
     const { street, city, postcode, state } = addressData;
 
@@ -957,15 +967,22 @@ function validateRealAddress(addressData) {
 
 function addNotification(targetUserId, title, message, trackingNo = null, extraData = {}) {
   if (!targetUserId) return;
-  
+  const now = Date.now();
   const newNotif = {
-    id: Date.now(),
+    id: now,
+    notificationId: extraData.notificationId || `notif_${now}`,
+    threadId: extraData.threadId || null,
+    type: extraData.type || (trackingNo || ['Out for Delivery', 'Delivered'].includes(extraData.status) ? 'tracking' : 'activity'),
+    senderRole: extraData.senderRole || 'system',
     userId: targetUserId,
     title: title,
     message: String(message),
     trackingNo: trackingNo,
     extraData: extraData,
-    date: new Date().toLocaleString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric', year: 'numeric' }),
+    replies: Array.isArray(extraData.replies) ? extraData.replies : [],
+    date: new Date(now).toLocaleString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric', year: 'numeric' }),
+    createdAt: now,
+    updatedAt: now,
     read: false
   };
 
@@ -1050,10 +1067,16 @@ function openNotificationDetail(id) {
     `;
   }
 
+  const replies = Array.isArray(notif.replies) ? notif.replies : [];
+  const replyHtml = replies.length
+    ? `<div class="notif-replies"><h4>CONVERSATION</h4>${replies.map((reply) => `<div class="notif-reply"><strong>${escapeHtml(reply.senderRole || 'reply')}</strong><small>${escapeHtml(reply.date || '')}</small><p>${escapeHtml(reply.message)}</p></div>`).join('')}</div>`
+    : '';
+
   if (messageContainer) {
     messageContainer.innerHTML = `
-      <div class="notif-body-text">${notif.message}</div>
+      <div class="notif-body-text">${escapeHtml(notif.message)}</div>
       ${extraHtml}
+      ${replyHtml}
       ${trackingCardHtml}
     `;
   }
@@ -1596,7 +1619,7 @@ function submitItemReview(e) {
   alert('Review submitted successfully!');
 }
 
-function submitInquiry(e) {
+async function submitInquiry(e) {
   e.preventDefault();
 
   const nameInput = document.getElementById('inquiry-name');
@@ -1607,23 +1630,53 @@ function submitInquiry(e) {
   const name = nameInput.value.trim();
   const email = emailInput.value.trim();
   const message = messageInput.value.trim();
-
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!name || !emailRegex.test(email) || !message) {
     alert('Please fill in your name, a valid email, and a message before sending.');
     return;
   }
-
-  if (typeof currentUser !== 'undefined' && currentUser) {
-    addNotification(currentUser.email, 'Inquiry Sent', `Your message has been received. We'll reply to ${email} shortly.`);
+  if (!currentUser?.email) {
+    alert('Please log in to your VOID account before sending an inquiry so the admin can reply securely.');
+    return;
   }
 
-  const form = document.getElementById('footer-inquiry-form');
-  form.reset();
+  const now = Date.now();
+  const inquiry = {
+    id: now,
+    notificationId: `inq_${now}`,
+    threadId: `inq_${now}`,
+    type: 'inquiry',
+    senderRole: 'customer',
+    userId: currentUser.email,
+    customerUid: currentUser.uid || null,
+    customerName: name,
+    customerEmail: email,
+    title: 'Customer Inquiry',
+    message,
+    replies: [],
+    status: 'open',
+    date: new Date(now).toLocaleString('en-MY'),
+    createdAt: now,
+    updatedAt: now,
+    read: false,
+    trackingNo: null,
+    extraData: { type: 'inquiry', customerName: name, customerEmail: email }
+  };
 
-  if (successMsg) {
-    successMsg.classList.add('show');
-    setTimeout(() => successMsg.classList.remove('show'), 5000);
+  notifications.unshift(inquiry);
+  try {
+    const saved = await saveNotificationsToCloud();
+    if (saved === null) throw new Error('Firebase rejected the inquiry write. Check the signed-in customer account and Firebase Rules.');
+    const form = document.getElementById('footer-inquiry-form');
+    if (form) form.reset();
+    if (successMsg) {
+      successMsg.innerText = 'Your inquiry was sent to VOID Central Hub. Replies will appear in Account notifications.';
+      successMsg.classList.add('show');
+      setTimeout(() => successMsg.classList.remove('show'), 5000);
+    }
+  } catch (error) {
+    notifications = notifications.filter((item) => item.notificationId !== inquiry.notificationId);
+    alert(`Inquiry could not be sent: ${error.message}`);
   }
 }
 
@@ -4853,12 +4906,20 @@ function bootFirebase() {
   });
 
   window.VoidFirebaseStore.subscribe('sales_history', (value) => {
-    salesHistoryData = value ? firebaseToArray(value) : [];
+    salesHistoryData = value
+      ? (window.VoidFirebaseStore.dedupeSalesHistory
+        ? window.VoidFirebaseStore.dedupeSalesHistory(value)
+        : firebaseToArray(value))
+      : [];
     if (document.getElementById('my-orders-list')) renderMyOrders();
   });
 
   window.VoidFirebaseStore.subscribe('lorry_batches', (value) => {
-    lorryBatches = value ? firebaseToArray(value) : [];
+    lorryBatches = value
+      ? (window.VoidFirebaseStore.dedupeLorryBatches
+        ? window.VoidFirebaseStore.dedupeLorryBatches(value)
+        : firebaseToArray(value))
+      : [];
     refreshOpenLorryTrackingFromFirebase();
     if (currentTrackingOrder && currentTrackingOrder.batchId && typeof renderLorryManifestPanel === 'function') renderLorryManifestPanel(currentTrackingOrder);
   });

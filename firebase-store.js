@@ -68,9 +68,51 @@
     return clean;
   }
 
+  function dedupeSalesHistory(value) {
+    const records = valuesAsArray(value);
+    const latestByOrderId = new Map();
+    records.forEach((record) => {
+      if (!record || typeof record !== 'object' || !record.orderId) return;
+      const orderId = String(record.orderId);
+      const current = latestByOrderId.get(orderId);
+      const recordTime = Number(record.updatedAt || record.createdAt || record.dispatchTime || record.deliveredAt || 0);
+      const currentTime = current
+        ? Number(current.updatedAt || current.createdAt || current.dispatchTime || current.deliveredAt || 0)
+        : -1;
+      const recordHasBatch = !!record.batchId;
+      const currentHasBatch = !!current?.batchId;
+      const recordStatus = String(record.status || '').toLowerCase();
+      const currentStatus = String(current?.status || '').toLowerCase();
+      const recordIsFinal = ['delivered', 'completed'].includes(recordStatus);
+      const currentIsFinal = ['delivered', 'completed'].includes(currentStatus);
+      const shouldReplace = !current
+        || (recordHasBatch && !currentHasBatch)
+        || (recordIsFinal && !currentIsFinal)
+        || (recordTime > currentTime && !(currentIsFinal && !recordIsFinal));
+      if (shouldReplace) latestByOrderId.set(orderId, record);
+    });
+    return Array.from(latestByOrderId.values());
+  }
+
+  function dedupeLorryBatches(value) {
+    const records = valuesAsArray(value);
+    const latestByBatchId = new Map();
+    records.forEach((record) => {
+      if (!record || typeof record !== 'object' || !record.batchId) return;
+      const batchId = String(record.batchId);
+      const current = latestByBatchId.get(batchId);
+      const recordTime = Number(record.lastUpdatedAt || record.updatedAt || record.dispatchTime || record.createdAt || 0);
+      const currentTime = current
+        ? Number(current.lastUpdatedAt || current.updatedAt || current.dispatchTime || current.createdAt || 0)
+        : -1;
+      if (!current || recordTime >= currentTime) latestByBatchId.set(batchId, record);
+    });
+    return Array.from(latestByBatchId.values());
+  }
+
   function stableRecordKey(record, fallbackPrefix = 'record') {
     const raw = record && (
-      record.uid || record.orderId || record.notificationId || record.slideId || record.id || record.email
+      record.uid || record.orderId || record.notificationId || record.batchId || record.slideId || record.id || record.email
     );
     return String(raw || `${fallbackPrefix}_${Date.now()}_${Math.random()}`)
       .replace(/[.#$\[\]/]/g, '_');
@@ -138,7 +180,7 @@
   }
 
   async function writeSalesHistoryCollection(orders) {
-    const list = valuesAsArray(orders);
+    const list = dedupeSalesHistory(orders);
     const authUser = currentAuthUser();
     const isAdmin = isCurrentSessionAdmin();
     const writable = isAdmin
@@ -271,6 +313,8 @@
     subscribe,
     valuesAsArray,
     sanitizeUserRecord,
+    dedupeSalesHistory,
+    dedupeLorryBatches,
     currentAuthUser,
     getSessionUser,
     setSessionUser
