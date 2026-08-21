@@ -2735,31 +2735,56 @@ function generateOtpCode() {
 }
 
 async function sendVerificationEmail(email, code) {
-  try {
-    if (window.firebaseDb) {
+  const emailjsConfig = window.VOID_EMAILJS_CONFIG || {
+    publicKey: 'xdX-B11WOlph_97qD',
+    serviceId: 'service_2fmh3k8',
+    templateId: 'template_bwduxni'
+  };
+
+  if (typeof emailjs === 'undefined' || typeof emailjs.send !== 'function') {
+    throw new Error('EmailJS SDK is not loaded. Check the email.min.js script in index.html.');
+  }
+
+  // Signup happens before Firebase Auth exists. Do not let an unauthenticated
+  // otp_logs write fail the email send. Log only when a Firebase user is already
+  // authenticated; EmailJS remains the source of the OTP delivery.
+  const authUser = window.firebaseAuth?.currentUser || null;
+  if (window.firebaseDb && authUser && typeof window.dbRef === 'function' && typeof window.dbSet === 'function') {
+    try {
       const otpRef = window.dbRef(window.firebaseDb, 'otp_logs/email_' + Date.now());
       await window.dbSet(otpRef, {
-        type: "EMAIL",
+        type: 'EMAIL',
         target: email,
         otp_code: code,
         timestamp: new Date().toISOString(),
-        status: "logged_to_backend"
+        status: 'logged_to_backend',
+        uid: authUser.uid
       });
+    } catch (logError) {
+      console.warn('Optional Firebase OTP log was not written; continuing with EmailJS.', logError);
     }
+  }
 
-    if (typeof emailjs !== 'undefined') {
-      await emailjs.send("service_2fmh3k8", "template_bwduxni", {
-        "email": email,             
-        "otp_code": code         
-      });
-      console.log("Real email sent via EmailJS!");
-    }
-    
-    return true; 
+  try {
+    const response = await emailjs.send(
+      emailjsConfig.serviceId,
+      emailjsConfig.templateId,
+      {
+        email: email,
+        otp_code: code,
+        to_email: email,
+        recipient_email: email,
+        reply_to: email
+      },
+      emailjsConfig.publicKey
+    );
+    console.log('Real email sent via EmailJS:', response?.status || 'OK');
+    return true;
   } catch (error) {
-    console.error("EmailJS Error:", error);
-    alert("Failed to send email. Check your EmailJS keys.");
-    return true; 
+    console.error('EmailJS Error:', error);
+    const detail = error?.text || error?.message || 'Unknown EmailJS failure';
+    alert(`Failed to send verification email: ${detail}`);
+    return false;
   }
 }
 
@@ -2869,10 +2894,13 @@ async function dispatchOtp(prefix, channel, target, btn) {
   };
 
   try {
-    if (channel === 'email') {
-      await sendVerificationEmail(target, code);
-    } else {
-      await sendVerificationSMS(target, code);
+    const sent = channel === 'email'
+      ? await sendVerificationEmail(target, code)
+      : await sendVerificationSMS(target, code);
+
+    if (!sent) {
+      otpState = { prefix: null, channel: null, target: null, code: null, expiresAt: null, attempts: 0, resendTimerId: otpState.resendTimerId };
+      return;
     }
   } finally {
     if (btn) {

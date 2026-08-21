@@ -721,10 +721,16 @@
 <!-- EmailJS SDK for Real OTP Emails -->
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
 <script>
-    (function(){
-        // You will need to create a free account at emailjs.com and put your Public Key here later
-        emailjs.init("xdX-B11WOlph_97qD"); 
-    })();
+    // Public client-side EmailJS configuration. Keep these IDs aligned with EmailJS Dashboard.
+    window.VOID_EMAILJS_CONFIG = Object.freeze({
+        publicKey: "xdX-B11WOlph_97qD",
+        serviceId: "service_2fmh3k8",
+        templateId: "template_bwduxni"
+    });
+
+    if (typeof emailjs !== "undefined" && typeof emailjs.init === "function") {
+        emailjs.init({ publicKey: window.VOID_EMAILJS_CONFIG.publicKey });
+    }
 </script>
 
 
